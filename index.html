@@ -40,7 +40,7 @@
                 <button class="tab-btn" data-mode="volume">🔥 거래량 랭킹</button>
                 <button class="tab-btn" data-mode="top_price">👑 최고가 랭킹</button>
                 <button class="tab-btn" data-mode="top_pyung">💎 최고 평당가</button>
-                <button class="tab-btn opacity-50 bg-slate-100" title="전월세 데이터 연동 후 오픈 예정" disabled>🔒 갭투자/전세가율 (준비중)</button>
+                <button class="tab-btn border-emerald-500 text-emerald-600" data-mode="gap_invest">🎯 갭투자/전세가율 순위</button>
             </div>
         </header>
 
@@ -152,6 +152,43 @@
                 const matchRegion = selectedRegion === 'all' || item.법정동 === selectedRegion;
                 const matchSearch = item.아파트.toLowerCase().includes(searchTerm);
                 return matchRegion && matchSearch;
+    if (currentMode === 'gap_invest') {
+    // 전세가율이 높은 순(또는 갭이 적은 순)으로 정렬
+    // 전세 데이터가 매칭된(전세가율 > 0) 매물만 필터링
+    let gapData = filtered.filter(item => item.전세가율 > 0)
+                          .sort((a, b) => b.전세가율 - a.전세가율);
+
+    listDiv.innerHTML = gapData.slice(0, 50).map((item, index) => `
+        <div class="bg-white p-5 rounded-3xl shadow-sm border border-emerald-100 relative overflow-hidden">
+            <div class="absolute top-0 right-0 bg-emerald-500 text-white px-3 py-1 rounded-bl-xl text-xs font-bold">
+                전세가율 ${Number(item.전세가율).toFixed(1)}%
+            </div>
+            
+            <div class="flex justify-between items-center mb-2 mt-2">
+                <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.법정동}</span>
+            </div>
+            <h3 class="text-lg font-extrabold text-slate-800 tracking-tighter">${index + 1}위. ${item.아파트}</h3>
+            
+            <div class="mt-4 p-3 bg-slate-50 rounded-xl flex justify-between items-center">
+                <div>
+                    <div class="text-[10px] text-slate-400 font-bold mb-1">매매가</div>
+                    <div class="font-bold text-slate-700">${(item.price/10000).toFixed(1)}억</div>
+                </div>
+                <div class="text-slate-300">-</div>
+                <div>
+                    <div class="text-[10px] text-slate-400 font-bold mb-1">전세가 (평균)</div>
+                    <div class="font-bold text-slate-700">${(item.전세가/10000).toFixed(1)}억</div>
+                </div>
+                <div class="text-slate-300">=</div>
+                <div class="text-right">
+                    <div class="text-[10px] text-emerald-600 font-bold mb-1">실투자금(갭)</div>
+                    <div class="font-black text-emerald-600 text-lg">${(item.갭_금액/10000).toFixed(1)}억</div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    return;
+}
             });
 
             listDiv.innerHTML = '';
