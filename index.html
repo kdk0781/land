@@ -190,6 +190,22 @@
                 </div>
                 `;
             }).join('');
+                function openDsrCalculator(aptName, price) {
+                    const modal = document.getElementById('dsr-modal');
+                    document.getElementById('modal-apt-name').innerText = aptName;
+                    
+                    // 모달 표시
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    
+                    // 초기 매매가 세팅 및 계산 실행 로직...
+                }
+                
+                function closeDsrModal() {
+                    const modal = document.getElementById('dsr-modal');
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }
         }
     </script>
 </body>
