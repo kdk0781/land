@@ -100,6 +100,7 @@ function setupEventListeners() {
     });
 }
 
+// 💡 카드 렌더링을 탭별로 분리하여 복구했습니다.
 function renderList() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase();
     const selectedSido = document.getElementById('sido-select').value;
@@ -122,11 +123,22 @@ function renderList() {
             if (item.price > grouped[key].maxP) grouped[key].maxP = item.price;
         });
         filtered = Object.values(grouped).sort((a, b) => b.count - a.count);
-    } else if (currentMode === 'top_price') filtered.sort((a, b) => b.price - a.price);
-    else if (currentMode === 'gap_invest') filtered = filtered.filter(d => d.jeonseRatio > 0).sort((a, b) => b.jeonseRatio - a.jeonseRatio);
-    else filtered.sort((a, b) => (b.계약년월 + b.계약일) - (a.계약년월 + a.계약일));
+        listDiv.innerHTML = filtered.slice(0, 50).map((item, idx) => renderVolumeCard(item, idx)).join('');
+    } 
+    else if (currentMode === 'gap_invest') {
+        filtered = filtered.filter(d => d.jeonseRatio > 0).sort((a, b) => b.jeonseRatio - a.jeonseRatio);
+        listDiv.innerHTML = filtered.slice(0, 50).map((item, idx) => renderGapCard(item, idx)).join('');
+    }
+    else {
+        if (currentMode === 'top_price') filtered.sort((a, b) => b.price - a.price);
+        else filtered.sort((a, b) => (b.계약년월 + b.계약일) - (a.계약년월 + a.계약일)); // latest
+        listDiv.innerHTML = filtered.slice(0, 50).map((item) => renderDefaultCard(item)).join('');
+    }
+}
 
-    listDiv.innerHTML = filtered.slice(0, 50).map((item, idx) => `
+// 1. 기본 매매 카드 (최신 거래, 최고가 순위)
+function renderDefaultCard(item) {
+    return `
         <div class="theme-card-bg p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
             <div class="flex justify-between items-start mb-2">
                 <div>
@@ -145,9 +157,58 @@ function renderList() {
             </div>
             <button onclick="openDsrModal('${item.아파트}', ${item.price}, '${item.regStatus}')" class="w-full mt-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-extrabold text-[10px] hover:bg-blue-100 transition-colors">💰 LTV/DSR 대출 한도 계산</button>
         </div>
-    `).join('');
+    `;
 }
 
+// 2. 거래량 순위 카드
+function renderVolumeCard(item, idx) {
+    return `
+        <div class="theme-card-bg p-5 rounded-3xl border ${idx < 3 ? 'border-l-4 border-l-blue-600 border-y-slate-100 border-r-slate-100' : 'border-slate-100'} shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-[10px] font-black text-blue-600 uppercase tracking-widest">${idx + 1}nd Ranking</span>
+                <span class="px-2 py-1 bg-blue-600 text-white text-[10px] font-black rounded-lg">거래 ${item.count}건</span>
+            </div>
+            <h3 class="text-lg font-extrabold theme-text">${item.아파트}</h3>
+            <p class="text-[10px] font-bold theme-text-sub mt-1">${item.sido} ${item.gudong}</p>
+        </div>
+    `;
+}
+
+// 3. 갭투자 / 전세가율 카드 (복구 및 테마 적용 완료)
+function renderGapCard(item, idx) {
+    const gapUk = (item.gap / 10000).toFixed(1);
+    return `
+        <div class="theme-card-bg p-5 rounded-3xl border border-emerald-100 shadow-sm relative overflow-hidden">
+            <div class="absolute top-0 right-0 bg-emerald-500 text-white px-3 py-1 text-[10px] font-black rounded-bl-xl italic">
+                전세가율 ${Number(item.jeonseRatio).toFixed(1)}%
+            </div>
+            <div class="mb-1 flex items-center mt-2">
+                <p class="text-[10px] font-extrabold theme-text-sub">${item.sido} ${item.gudong}</p>
+                <span class="px-2 py-1 ${item.regStatus.includes('투기') ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} text-[10px] font-extrabold rounded-lg ml-2">${item.regStatus}</span>
+            </div>
+            <h3 class="text-lg font-extrabold theme-text mb-4">${idx+1}. ${item.아파트}</h3>
+            
+            <div class="flex justify-between items-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl">
+                <div class="text-center flex-1">
+                    <p class="text-[9px] font-black text-emerald-600/70 dark:text-emerald-400 mb-1">매매가</p>
+                    <p class="font-bold theme-text text-xs">${(item.price/10000).toFixed(1)}억</p>
+                </div>
+                <div class="w-px h-6 bg-emerald-200 dark:bg-emerald-800"></div>
+                <div class="text-center flex-1">
+                    <p class="text-[9px] font-black text-emerald-600/70 dark:text-emerald-400 mb-1">평균 전세가</p>
+                    <p class="font-bold theme-text text-xs">${(item.jeonsePrice/10000).toFixed(1)}억</p>
+                </div>
+                <div class="w-px h-6 bg-emerald-200 dark:bg-emerald-800"></div>
+                <div class="text-center flex-1">
+                    <p class="text-[9px] font-black text-emerald-600 dark:text-emerald-300 mb-1">투자금(GAP)</p>
+                    <p class="font-black text-emerald-600 dark:text-emerald-300">${gapUk}억</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// 대출 모달 로직
 function openDsrModal(name, price, regStatus) {
     currentRegStatus = regStatus;
     document.getElementById('modal-apt-name').innerText = name;
@@ -169,7 +230,8 @@ function calculateDsr() {
     const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
     const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
     const price = parseFloat(document.getElementById('calc-price').value) || 0;
-    const isFirstHome = document.getElementById('calc-first-home').checked;
+    const isFirstHomeElement = document.getElementById('calc-first-home');
+    const isFirstHome = isFirstHomeElement ? isFirstHomeElement.checked : false;
     
     const totalRate = (baseRate + stressRate) / 100;
     let ltvRatio = 0.7;
