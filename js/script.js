@@ -1,12 +1,14 @@
 'use strict';
 
-// ─── 상태 ───────────────────────────────────────────────
-let allData     = [];
+// ═══ 상태 ════════════════════════════════════════════
+let allData     = [];   // 실거래 데이터
+let kbMap       = {};   // KB시세 맵 { "아파트명||전용면적반올림" → {하한가,일반거래가,상한가} }
 let currentMode = 'latest';
 let currentRegStatus = '비규제지역';
+let currentKbPrice   = 0;   // 현재 모달의 KB일반거래가
 let activeModalTab   = 'loan';
 
-// ─── 규제지역 정의 (2026 기준) ──────────────────────────
+// ═══ 규제지역 (2026 기준) ════════════════════════════
 const REG_SIDO = new Set(['서울특별시']);
 const REG_GU   = new Set([
     '과천시','광명시','의왕시','하남시',
@@ -16,176 +18,209 @@ const REG_GU   = new Set([
 ]);
 
 function getRegStatus(sido, sigungu) {
-    if (REG_SIDO.has(sido))                         return '투기/조정대상';
-    if (sido === '경기도' && REG_GU.has(sigungu)) return '투기/조정대상';
+    if (REG_SIDO.has(sido))                          return '투기/조정대상';
+    if (sido === '경기도' && REG_GU.has(sigungu))  return '투기/조정대상';
     return '비규제지역';
 }
 
-// ─── 부동산 규정 상수 ─────────────────────────────────
-const BROKERAGE_RATE = {
-    매매: [
-        { max: 5000,    rate: .006,  maxFee: 250000 },
-        { max: 20000,   rate: .005,  maxFee: 800000 },
-        { max: 90000,   rate: .004,  maxFee: null },
-        { max: 120000,  rate: .005,  maxFee: null },
-        { max: 150000,  rate: .006,  maxFee: null },
-        { max: Infinity,rate: .007,  maxFee: null },
-    ]
-};
+// ═══ 중개수수료 요율표 ════════════════════════════════
+const BROKER_TABLE = [
+    { max: 5000,     rate: .006, maxFee: 250000  },
+    { max: 20000,    rate: .005, maxFee: 800000  },
+    { max: 90000,    rate: .004, maxFee: null     },
+    { max: 120000,   rate: .005, maxFee: null     },
+    { max: 150000,   rate: .006, maxFee: null     },
+    { max: Infinity, rate: .007, maxFee: null     },
+];
 
-// ─── 초기화 ───────────────────────────────────────────
+// ═══ 초기화 ══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-    loadData();
     setupEventListeners();
+    loadAllData();
 });
 
-// ─── 데이터 로드 ──────────────────────────────────────
-function setLoaderText(msg) {
+// ═══ 로더 헬퍼 ═══════════════════════════════════════
+function setLoader(text) {
     const el = document.querySelector('.loader-text');
-    if (el) el.textContent = msg;
+    if (el) el.textContent = text;
 }
-
 function hideLoader() {
-    const loader = document.getElementById('loader');
-    if (loader) loader.style.display = 'none';
+    const el = document.getElementById('loader');
+    if (el) el.style.display = 'none';
 }
 
-function loadData() {
-    const CSV_PATH = 'apt_trade_data.csv';
-
-    // 안전장치: 30초 후에도 로더가 있으면 에러 처리
-    const safetyTimer = setTimeout(() => {
+// ═══ 데이터 병렬 로드 ════════════════════════════════
+function loadAllData() {
+    // 30초 안전장치
+    const guard = setTimeout(() => {
         hideLoader();
-        showEmpty('⏱ 데이터 로딩 시간이 초과됐습니다.\nCSV 파일이 올바른 경로에 있는지 확인하세요.\n(예상 경로: land/apt_trade_data.csv)');
+        showEmpty('⏱ 로딩 시간 초과. CSV 파일이 같은 폴더에 있는지 확인하세요.');
     }, 30000);
 
-    setLoaderText('CSV 파일 확인 중...');
+    setLoader('실거래 데이터 로드 중...');
 
-    // Step 1: fetch로 파일 존재 여부 먼저 확인
-    fetch(CSV_PATH, { method: 'HEAD' })
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            setLoaderText('데이터 다운로드 중...');
-            return fetch(CSV_PATH);
-        })
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.text();
-        })
-        .then(csvText => {
-            setLoaderText('실거래 데이터 파싱 중...');
+    const tradePromise = loadCsvChunk('apt_trade_data.csv');
+    const kbPromise    = loadCsvChunk('map.csv');
 
-            // Step 2: 텍스트로 파싱 (더 안정적)
-            Papa.parse(csvText, {
-                header: true,
-                skipEmptyLines: true,
-                complete: results => {
-                    clearTimeout(safetyTimer);
+    Promise.all([tradePromise, kbPromise])
+        .then(([tradeRows, kbRows]) => {
+            clearTimeout(guard);
 
-                    // BOM 제거 처리 (한글 CSV 헤더 버그 방지)
-                    const firstKey = results.meta.fields && results.meta.fields[0];
-                    const hasBom   = firstKey && firstKey.charCodeAt(0) === 0xFEFF;
+            // ── 실거래 데이터 처리 ──
+            setLoader('실거래 데이터 처리 중...');
+            allData = tradeRows
+                .filter(r => getField(r, '아파트') && getField(r, '거래금액_n'))
+                .map(r => {
+                    const sidoRaw = getField(r, 'sido') || '미분류';
+                    const sigungu = getField(r, 'sigungu') || '';
+                    const dong    = getField(r, 'dong')    || '';
+                    const price   = parseFloat(getField(r, '거래금액_n'));
+                    const area    = parseFloat(getField(r, '전용면적'));
+                    const pyung   = area / 3.3058;
+                    return {
+                        ...r,
+                        price,
+                        pyung:       pyung.toFixed(1),
+                        pyungPrice:  Math.round(price / pyung),
+                        areaRound:   Math.round(area),
+                        sido:        sidoRaw,
+                        sigungu,
+                        dong,
+                        gudong:      `${sigungu} ${dong}`.trim(),
+                        regStatus:   getRegStatus(sidoRaw, sigungu),
+                        gap:         parseFloat(getField(r, 'gap')         || 0),
+                        jeonseRatio: parseFloat(getField(r, 'jeonseRatio') || 0),
+                        jeonsePrice: parseFloat(getField(r, 'jeonsePrice') || 0),
+                        아파트:      getField(r, '아파트') || '',
+                        전용면적:    getField(r, '전용면적') || '',
+                        층:          getField(r, '층') || '',
+                        계약년월:    getField(r, '계약년월') || '',
+                        계약일:      getField(r, '계약일') || '',
+                    };
+                });
 
-                    allData = results.data
-                        .filter(r => {
-                            const name  = hasBom ? r['\uFEFFsido'] : r.sido;
-                            const apt   = r['아파트'] || r['\uFEFF아파트'];
-                            return apt && r['거래금액_n'];
-                        })
-                        .map(r => {
-                            // BOM이 붙은 경우 sido 키 보정
-                            const sido_raw = r.sido || r['\uFEFFsido'] || '미분류';
-                            const price = parseFloat(r['거래금액_n']);
-                            const area  = parseFloat(r['전용면적']);
-                            const pyung = area / 3.3058;
-                            const sigungu = r.sigungu || '';
-                            const dong    = r.dong    || '';
-                            return {
-                                ...r,
-                                price,
-                                pyung:       pyung.toFixed(1),
-                                pyungPrice:  Math.round(price / pyung),
-                                sido:        sido_raw,
-                                sigungu,
-                                dong,
-                                gudong:      `${sigungu} ${dong}`.trim(),
-                                regStatus:   getRegStatus(sido_raw, sigungu),
-                                gap:         parseFloat(r.gap          || 0),
-                                jeonseRatio: parseFloat(r.jeonseRatio  || 0),
-                                jeonsePrice: parseFloat(r.jeonsePrice  || 0),
-                                아파트:      r['아파트'] || r['\uFEFF아파트'] || '',
-                            };
-                        });
+            // ── KB 시세 처리 ──
+            setLoader('KB 시세 데이터 처리 중...');
+            kbRows.forEach(r => {
+                // map.csv 컬럼: sido,sigungu,dong,apt,type1,area,type2,pyung,하한가,일반거래가,상한가
+                const aptName = getField(r, 'apt') || getField(r, '아파트');
+                const area    = parseFloat(getField(r, 'area') || getField(r, '전용면적') || 0);
+                const lowStr  = getField(r, '하한가')    || '0';
+                const midStr  = getField(r, '일반거래가') || '0';
+                const highStr = getField(r, '상한가')    || '0';
 
-                    initSidoSelect();
-                    updateStats();
-                    document.getElementById('total-count').textContent = allData.length.toLocaleString();
-                    hideLoader();
-                    renderList();
-                },
-                error: err => {
-                    clearTimeout(safetyTimer);
-                    hideLoader();
-                    showEmpty(`CSV 파싱 오류: ${err.message}`);
-                }
+                if (!aptName || !area) return;
+
+                const toNum = s => parseFloat(String(s).replace(/,/g,'')) || 0;
+                const key = `${aptName.trim()}||${Math.round(area)}`;
+                // 동일 아파트 여러 평형 → 모두 저장 (배열)
+                if (!kbMap[key]) kbMap[key] = [];
+                kbMap[key].push({
+                    하한가:    toNum(lowStr),
+                    일반거래가: toNum(midStr),
+                    상한가:    toNum(highStr),
+                    area,
+                });
             });
+
+            const kbCount = Object.keys(kbMap).length;
+            document.getElementById('kb-status').textContent = `KB 시세 ${kbCount.toLocaleString()}건 ✓`;
+            document.getElementById('kb-status').className = 'kb-status loaded';
+
+            initSidoSelect();
+            updateStats();
+            document.getElementById('total-count').textContent = allData.length.toLocaleString();
+            hideLoader();
+            renderList();
         })
         .catch(err => {
-            clearTimeout(safetyTimer);
+            clearTimeout(guard);
             hideLoader();
-            const msg = err.message.includes('404') || err.message.includes('403')
-                ? '❌ CSV 파일을 찾을 수 없습니다.\napt_trade_data.csv 파일이 index.html과 같은 폴더에 있어야 합니다.'
-                : `❌ 네트워크 오류: ${err.message}`;
-            showEmpty(msg);
+            showEmpty(`❌ 로드 실패: ${err.message}\n\napt_trade_data.csv와 map.csv가 index.html과 같은 폴더에 있어야 합니다.`);
         });
 }
 
+// ── chunk 방식 CSV 로드 (Call Stack 안전) ──
+function loadCsvChunk(path) {
+    return new Promise((resolve, reject) => {
+        const rows = [];
+        let headers = null;
+
+        Papa.parse(path, {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            chunk: (results) => {
+                if (!headers && results.meta.fields) headers = results.meta.fields;
+                rows.push(...results.data);
+            },
+            complete: () => resolve(rows),
+            error: (err)  => reject(new Error(err.message || `${path} 로드 실패`)),
+        });
+    });
+}
+
+// BOM-safe 필드 읽기
+function getField(row, key) {
+    if (row[key] !== undefined) return row[key];
+    // BOM 붙은 경우
+    const bomKey = '\uFEFF' + key;
+    if (row[bomKey] !== undefined) return row[bomKey];
+    return undefined;
+}
+
+// KB 시세 조회
+function getKbPrice(aptName, areaStr) {
+    const area = parseFloat(areaStr) || 0;
+    // 정확 매칭
+    let key = `${aptName.trim()}||${Math.round(area)}`;
+    if (kbMap[key] && kbMap[key].length) return kbMap[key][0];
+    // ±2㎡ 허용 매칭
+    for (let d = 1; d <= 5; d++) {
+        key = `${aptName.trim()}||${Math.round(area) + d}`;
+        if (kbMap[key]) return kbMap[key][0];
+        key = `${aptName.trim()}||${Math.round(area) - d}`;
+        if (kbMap[key]) return kbMap[key][0];
+    }
+    return null;
+}
+
+// ═══ 시도/구동 셀렉트 ════════════════════════════════
 function initSidoSelect() {
     const sidos = [...new Set(allData.map(d => d.sido))].filter(s => s !== '미분류').sort();
     const sel   = document.getElementById('sido-select');
     sidos.forEach(s => {
         const o = document.createElement('option');
-        o.value = s; o.textContent = s;
-        sel.appendChild(o);
+        o.value = s; o.textContent = s; sel.appendChild(o);
     });
 }
 
 function updateStats() {
-    const prices = allData.map(d => d.price).filter(p => p > 0);
+    const prices = allData.map(d => d.price).filter(Boolean);
     if (!prices.length) return;
-    const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const avg    = prices.reduce((a, b) => a + b, 0) / prices.length;
     const sorted = [...prices].sort((a, b) => a - b);
-    const med = sorted[Math.floor(sorted.length / 2)];
-    const max = Math.max(...prices);
-
-    document.getElementById('stat-avg').textContent = (avg / 10000).toFixed(1) + '억';
-    document.getElementById('stat-med').textContent = (med / 10000).toFixed(1) + '억';
-    document.getElementById('stat-max').textContent = (max / 10000).toFixed(1) + '억';
+    const med    = sorted[Math.floor(sorted.length / 2)];
+    const max    = sorted[sorted.length - 1];
+    el('stat-avg').textContent = f억(avg);
+    el('stat-med').textContent = f억(med);
+    el('stat-max').textContent = f억(max);
 }
 
-// ─── 이벤트 ───────────────────────────────────────────
+// ═══ 이벤트 ══════════════════════════════════════════
 function setupEventListeners() {
-    // 시/도 변경 → 구/동 목록
-    document.getElementById('sido-select').addEventListener('change', function () {
-        const regSel = document.getElementById('region-select');
+    el('sido-select').addEventListener('change', function () {
+        const regSel = el('region-select');
         regSel.innerHTML = '<option value="all">구/동 전체</option>';
-        if (this.value === 'all') {
-            regSel.disabled = true;
-        } else {
-            regSel.disabled = false;
-            [...new Set(allData.filter(d => d.sido === this.value).map(d => d.gudong))]
-                .sort()
-                .forEach(g => {
-                    const o = document.createElement('option');
-                    o.value = g; o.textContent = g;
-                    regSel.appendChild(o);
-                });
+        regSel.disabled = (this.value === 'all');
+        if (this.value !== 'all') {
+            [...new Set(allData.filter(d => d.sido === this.value).map(d => d.gudong))].sort()
+                .forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; regSel.appendChild(o); });
         }
         renderList();
     });
-
-    document.getElementById('region-select').addEventListener('change', renderList);
-    document.getElementById('search-input').addEventListener('input',  renderList);
+    el('region-select').addEventListener('change', renderList);
+    el('search-input').addEventListener('input', renderList);
 
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', function () {
@@ -196,419 +231,413 @@ function setupEventListeners() {
         });
     });
 
-    // 모달 내 탭
     document.querySelectorAll('.modal-tab').forEach(t => {
         t.addEventListener('click', function () {
             document.querySelectorAll('.modal-tab').forEach(x => x.classList.remove('active'));
             this.classList.add('active');
             activeModalTab = this.dataset.tab;
             document.querySelectorAll('.modal-panel').forEach(p => p.classList.add('hidden'));
-            document.getElementById(`panel-${activeModalTab}`).classList.remove('hidden');
-            if (activeModalTab === 'loan') calculateLoan();
-            if (activeModalTab === 'tax')  calculateTax();
-            if (activeModalTab === 'fee')  calculateFee();
+            el(`panel-${activeModalTab}`).classList.remove('hidden');
+            recalcAll();
         });
     });
 
-    // 대출 계산 인풋
-    ['calc-income','calc-base-rate','calc-stress','calc-first-home'].forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.addEventListener('input',  () => { calculateLoan(); calculateTax(); calculateFee(); });
-        el.addEventListener('change', () => { calculateLoan(); calculateTax(); calculateFee(); });
+    ['calc-income','calc-base-rate','calc-stress','calc-first-home','calc-house-count'].forEach(id => {
+        const el2 = document.getElementById(id);
+        if (el2) { el2.addEventListener('input', recalcAll); el2.addEventListener('change', recalcAll); }
     });
 
-    // 주택수 선택
-    const houseCount = document.getElementById('calc-house-count');
-    if (houseCount) houseCount.addEventListener('change', calculateTax);
-
-    // 모달 바깥 클릭으로 닫기
-    document.getElementById('dsr-modal').addEventListener('click', function(e) {
-        if (e.target === this) closeModal('dsr-modal');
-    });
-    document.getElementById('history-modal').addEventListener('click', function(e) {
-        if (e.target === this) closeModal('history-modal');
-    });
+    el('dsr-modal').addEventListener('click',     e => { if (e.target === el('dsr-modal'))     closeModal('dsr-modal'); });
+    el('history-modal').addEventListener('click', e => { if (e.target === el('history-modal')) closeModal('history-modal'); });
 }
 
-// ─── 렌더링 ───────────────────────────────────────────
+// ═══ 렌더링 ══════════════════════════════════════════
 function renderList() {
-    const search      = document.getElementById('search-input').value.toLowerCase();
-    const selectedSido= document.getElementById('sido-select').value;
-    const selectedGu  = document.getElementById('region-select').value;
-    const listDiv     = document.getElementById('card-list');
+    const search = el('search-input').value.toLowerCase();
+    const sido   = el('sido-select').value;
+    const gudong = el('region-select').value;
+    const grid   = el('card-grid');
 
     let filtered = allData.filter(d =>
-        (selectedSido === 'all' || d.sido === selectedSido) &&
-        (selectedGu   === 'all' || d.gudong === selectedGu)  &&
+        (sido   === 'all' || d.sido   === sido)   &&
+        (gudong === 'all' || d.gudong === gudong) &&
         d.아파트.toLowerCase().includes(search)
     );
 
     if (!filtered.length) {
-        listDiv.innerHTML = `
-          <div class="empty-state">
-            <div class="icon">🔍</div>
-            <p>검색 결과가 없습니다</p>
-          </div>`;
+        grid.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><p class="empty-msg">검색 결과가 없습니다</p></div>`;
         return;
     }
 
     if (currentMode === 'volume') {
-        const grouped = {};
+        const grp = {};
         filtered.forEach(d => {
             const k = `${d.sido}||${d.gudong}||${d.아파트}`;
-            if (!grouped[k]) grouped[k] = { ...d, count: 0, maxP: 0, minP: Infinity };
-            grouped[k].count++;
-            if (d.price > grouped[k].maxP) grouped[k].maxP = d.price;
-            if (d.price < grouped[k].minP) grouped[k].minP = d.price;
+            if (!grp[k]) grp[k] = { ...d, count: 0, maxP: 0, minP: Infinity };
+            grp[k].count++;
+            if (d.price > grp[k].maxP) grp[k].maxP = d.price;
+            if (d.price < grp[k].minP) grp[k].minP = d.price;
         });
-        const arr = Object.values(grouped).sort((a, b) => b.count - a.count);
-        listDiv.innerHTML = arr.slice(0, 50).map((d, i) => cardVolume(d, i)).join('');
+        grid.innerHTML = Object.values(grp).sort((a,b)=>b.count-a.count).slice(0,60).map((d,i)=>cardVolume(d,i)).join('');
 
     } else if (currentMode === 'gap_invest') {
-        filtered = filtered.filter(d => d.jeonseRatio > 0).sort((a, b) => b.jeonseRatio - a.jeonseRatio);
-        listDiv.innerHTML = filtered.slice(0, 50).map((d, i) => cardGap(d, i)).join('');
+        grid.innerHTML = filtered.filter(d=>d.jeonseRatio>0).sort((a,b)=>b.jeonseRatio-a.jeonseRatio)
+            .slice(0,60).map((d,i)=>cardGap(d,i)).join('');
 
     } else if (currentMode === 'compare') {
-        // KB 시세 비교: 아파트별 최근 거래 vs 평균 비교
-        const grouped = {};
+        // KB 시세 vs 실거래가 비교
+        const grp = {};
         filtered.forEach(d => {
-            const k = `${d.아파트}||${Math.round(parseFloat(d.전용면적))}`;
-            if (!grouped[k]) grouped[k] = { ...d, prices: [], count: 0 };
-            grouped[k].prices.push(d.price);
-            grouped[k].count++;
+            const kb = getKbPrice(d.아파트, d.전용면적);
+            if (!kb) return;
+            const k = `${d.아파트}||${d.areaRound}`;
+            if (!grp[k] || d.price > grp[k].price) grp[k] = { ...d, kb };
         });
-        const arr = Object.values(grouped)
-            .filter(d => d.count >= 2)
-            .map(d => {
-                const sorted = [...d.prices].sort((a, b) => a - b);
-                const avg    = d.prices.reduce((a, b) => a + b, 0) / d.prices.length;
-                const recent = d.price; // 마지막 데이터 = 최근
-                const change = ((recent - avg) / avg * 100);
-                return { ...d, avg, recent, change, sortedPrices: sorted };
-            })
-            .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-        listDiv.innerHTML = arr.slice(0, 50).map((d, i) => cardCompare(d, i)).join('');
+        const arr = Object.values(grp)
+            .map(d => ({ ...d, diff: d.price - d.kb.일반거래가, diffPct: ((d.price - d.kb.일반거래가)/d.kb.일반거래가*100) }))
+            .sort((a,b) => Math.abs(b.diffPct) - Math.abs(a.diffPct));
+        if (!arr.length) {
+            grid.innerHTML = `<div class="empty-state"><div class="empty-icon">📊</div><p class="empty-msg">KB 시세와 매칭되는 데이터가 없습니다.<br>지역을 좁혀서 검색해보세요.</p></div>`;
+            return;
+        }
+        grid.innerHTML = arr.slice(0,60).map((d,i)=>cardCompare(d,i)).join('');
 
     } else {
-        if (currentMode === 'top_price') {
-            filtered.sort((a, b) => b.price - a.price);
-        } else {
-            filtered.sort((a, b) =>
-                (b.계약년월 + String(b.계약일).padStart(2,'0')) -
-                (a.계약년월 + String(a.계약일).padStart(2,'0'))
-            );
-        }
-        listDiv.innerHTML = filtered.slice(0, 50).map(d => cardDefault(d)).join('');
+        if (currentMode === 'top_price') filtered.sort((a,b)=>b.price-a.price);
+        else filtered.sort((a,b)=>(b.계약년월+String(b.계약일).padStart(2,'0'))-(a.계약년월+String(a.계약일).padStart(2,'0')));
+        grid.innerHTML = filtered.slice(0,60).map(d=>cardDefault(d)).join('');
     }
 }
 
-// ─── 카드 템플릿 ──────────────────────────────────────
-function regBadge(status) {
-    return status.includes('투기')
-        ? `<span class="badge badge-reg">🔴 ${status}</span>`
-        : `<span class="badge badge-free">🟢 ${status}</span>`;
+// ═══ 카드 템플릿 ══════════════════════════════════════
+function regBadge(s) {
+    return s.includes('투기')
+        ? `<span class="badge badge-reg">🔴 ${s}</span>`
+        : `<span class="badge badge-free">🟢 비규제</span>`;
+}
+
+function kbChip(tradePrice, kb) {
+    if (!kb) return '';
+    const mid  = kb.일반거래가;
+    const diff = tradePrice - mid;
+    const pct  = (diff / mid * 100).toFixed(1);
+    if (Math.abs(diff) < mid * 0.01) return `<span class="kb-chip neutral">KB ${f억(mid)} ≈ 비슷</span>`;
+    if (diff > 0) return `<span class="kb-chip pricey">실거래 ▲${pct}% vs KB</span>`;
+    return `<span class="kb-chip cheap">실거래 ▼${Math.abs(pct)}% vs KB</span>`;
 }
 
 function cardDefault(d) {
-    const priceStr = (d.price / 10000).toFixed(2);
-    const ym = String(d.계약년월);
-    const dateStr = `${ym.slice(0,4)}.${ym.slice(4)}.${String(d.계약일).padStart(2,'0')}`;
+    const kb   = getKbPrice(d.아파트, d.전용면적);
+    const ym   = String(d.계약년월);
+    const date = `${ym.slice(0,4)}.${ym.slice(4)}.${String(d.계약일).padStart(2,'0')}`;
     return `
-    <div class="card" onclick="openHistory('${escHtml(d.아파트)}', '${d.sido}', '${d.gudong}')">
-        <div class="card-top">
-            <div class="badge-row">
-                <span class="badge badge-region">${d.sido} ${d.gudong}</span>
-                ${regBadge(d.regStatus)}
-            </div>
-            <span class="badge badge-date">${dateStr}</span>
-        </div>
-        <div class="card-name">${escHtml(d.아파트)}</div>
-        <div class="card-meta">${d.전용면적}㎡ · ${d.pyung}평 · ${d.층}층</div>
-        <div class="card-bottom">
-            <div>
-                <div class="price-main">${priceStr}억</div>
-                <div class="price-sub">평당 ${d.pyungPrice.toLocaleString()}만</div>
-            </div>
-            <button class="loan-btn" onclick="event.stopPropagation(); openDsrModal('${escHtml(d.아파트)}', ${d.price}, '${d.regStatus}')">
-                💰 대출 계산
-            </button>
-        </div>
-    </div>`;
+<div class="card" onclick="openHistory('${esc(d.아파트)}','${esc(d.sido)}','${esc(d.gudong)}')">
+  <div class="badge-row">
+    <span class="badge badge-region">${d.sido} ${d.gudong}</span>
+    ${regBadge(d.regStatus)}
+    <span class="badge badge-date">${date}</span>
+  </div>
+  <div class="card-name">${d.아파트}</div>
+  <div class="card-meta">${d.전용면적}㎡ · ${d.pyung}평 · ${d.층}층</div>
+  ${kb ? `<div class="kb-compare-row">${kbChip(d.price, kb)}<span class="kb-chip neutral">KB ${f억(kb.일반거래가)}</span></div>` : ''}
+  <div class="card-bottom">
+    <div>
+      <div class="price-main">${f억(d.price)}</div>
+      <div class="price-sub">평당 ${d.pyungPrice.toLocaleString()}만</div>
+    </div>
+    <button class="loan-btn" onclick="event.stopPropagation();openModal2('${esc(d.아파트)}',${d.price},${kb ? kb.일반거래가 : 0},'${d.regStatus}','${d.전용면적}')">💰 대출 계산</button>
+  </div>
+</div>`;
 }
 
 function cardVolume(d, idx) {
-    const isTop = idx < 3;
     return `
-    <div class="card card-rank ${isTop ? 'top' : ''}" onclick="openHistory('${escHtml(d.아파트)}', '${d.sido}', '${d.gudong}')">
-        <div class="card-top">
-            <div class="rank-badge">${idx + 1}위 거래량 순위</div>
-            <span class="vol-badge">${d.count}건</span>
-        </div>
-        <div class="card-name">${escHtml(d.아파트)}</div>
-        <div class="card-meta">${d.sido} ${d.gudong}</div>
-        <div class="card-bottom">
-            <div>
-                <div class="price-sub" style="font-size:.72rem">최고 <b style="color:var(--red)">${(d.maxP/10000).toFixed(1)}억</b></div>
-                <div class="price-sub" style="font-size:.72rem">최저 <b style="color:var(--blue)">${(d.minP/10000).toFixed(1)}억</b></div>
-            </div>
-            <button class="loan-btn" onclick="event.stopPropagation(); openDsrModal('${escHtml(d.아파트)}', ${d.maxP}, '${d.regStatus}')">
-                💰 대출 계산
-            </button>
-        </div>
-    </div>`;
+<div class="card card-rank ${idx<3?'top':''}" onclick="openHistory('${esc(d.아파트)}','${esc(d.sido)}','${esc(d.gudong)}')">
+  <div class="badge-row">
+    <span class="rank-label">${idx+1}위</span>
+    <span class="vol-badge">${d.count}건</span>
+  </div>
+  <div class="card-name">${d.아파트}</div>
+  <div class="card-meta">${d.sido} ${d.gudong}</div>
+  <div class="card-bottom">
+    <div>
+      <div class="price-sub">최고 <b style="color:var(--red)">${f억(d.maxP)}</b></div>
+      <div class="price-sub">최저 <b style="color:var(--blue)">${f억(d.minP)}</b></div>
+    </div>
+    <button class="loan-btn" onclick="event.stopPropagation();openModal2('${esc(d.아파트)}',${d.maxP},0,'${d.regStatus}','${d.전용면적}')">💰 대출 계산</button>
+  </div>
+</div>`;
 }
 
 function cardGap(d, idx) {
-    const gapBuk = (d.gap / 10000).toFixed(1);
+    const kb = getKbPrice(d.아파트, d.전용면적);
     return `
-    <div class="card card-gap" onclick="openHistory('${escHtml(d.아파트)}', '${d.sido}', '${d.gudong}')">
-        <div class="ratio-badge">전세가율 ${Number(d.jeonseRatio).toFixed(1)}%</div>
-        <div class="badge-row" style="margin-top:.25rem;margin-bottom:.4rem">
-            <span class="badge badge-region">${d.sido} ${d.gudong}</span>
-            ${regBadge(d.regStatus)}
-        </div>
-        <div class="card-name">${idx + 1}. ${escHtml(d.아파트)}</div>
-        <div class="card-meta">${d.전용면적}㎡ · ${d.pyung}평</div>
-        <div class="gap-grid">
-            <div class="gap-cell">
-                <div class="gap-cell-label">매매가</div>
-                <div class="gap-cell-value">${(d.price/10000).toFixed(1)}억</div>
-            </div>
-            <div class="gap-divider"></div>
-            <div class="gap-cell">
-                <div class="gap-cell-label">평균 전세가</div>
-                <div class="gap-cell-value">${(d.jeonsePrice/10000).toFixed(1)}억</div>
-            </div>
-            <div class="gap-divider"></div>
-            <div class="gap-cell">
-                <div class="gap-cell-label">투자금(GAP)</div>
-                <div class="gap-cell-value accent">${gapBuk}억</div>
-            </div>
-        </div>
-        <div style="margin-top:.625rem;text-align:right">
-            <button class="loan-btn" onclick="event.stopPropagation(); openDsrModal('${escHtml(d.아파트)}', ${d.price}, '${d.regStatus}')">
-                💰 대출 계산
-            </button>
-        </div>
-    </div>`;
+<div class="card" onclick="openHistory('${esc(d.아파트)}','${esc(d.sido)}','${esc(d.gudong)}')">
+  <div style="position:absolute;top:0;right:0;background:var(--green);color:#fff;font-size:.58rem;font-weight:900;padding:.25rem .6rem;border-bottom-left-radius:.5rem">전세가율 ${Number(d.jeonseRatio).toFixed(1)}%</div>
+  <div class="badge-row" style="margin-top:.2rem">
+    <span class="badge badge-region">${d.sido} ${d.gudong}</span>
+    ${regBadge(d.regStatus)}
+  </div>
+  <div class="card-name">${idx+1}. ${d.아파트}</div>
+  <div class="card-meta">${d.전용면적}㎡ · ${d.pyung}평</div>
+  ${kb ? `<div class="kb-compare-row">${kbChip(d.price,kb)}</div>` : ''}
+  <div class="gap-grid">
+    <div class="gap-cell"><div class="gap-cell-label">매매가</div><div class="gap-cell-value">${f억(d.price)}</div></div>
+    <div class="gap-div"></div>
+    <div class="gap-cell"><div class="gap-cell-label">평균 전세가</div><div class="gap-cell-value">${f억(d.jeonsePrice)}</div></div>
+    <div class="gap-div"></div>
+    <div class="gap-cell"><div class="gap-cell-label">투자금(GAP)</div><div class="gap-cell-value accent">${f억(d.gap)}</div></div>
+  </div>
+  <div style="text-align:right;margin-top:.625rem">
+    <button class="loan-btn" onclick="event.stopPropagation();openModal2('${esc(d.아파트)}',${d.price},${kb?kb.일반거래가:0},'${d.regStatus}','${d.전용면적}')">💰 대출 계산</button>
+  </div>
+</div>`;
 }
 
 function cardCompare(d, idx) {
-    const isUp  = d.change >= 0;
-    const arrow = isUp ? '▲' : '▼';
-    const cls   = isUp ? 'up' : 'down';
-    const ratio = Math.min(100, Math.max(0, (d.recent / Math.max(...d.sortedPrices)) * 100));
+    const kb      = d.kb;
+    const isOver  = d.diff > 0;
+    const arrow   = isOver ? '▲' : '▼';
+    const absPct  = Math.abs(d.diffPct).toFixed(1);
+    const maxVal  = Math.max(d.price, kb.상한가);
+    const fillPct = Math.min(100, (d.price / maxVal * 100));
     return `
-    <div class="card card-compare" onclick="openHistory('${escHtml(d.아파트)}', '${d.sido}', '${d.gudong}')">
-        <div class="card-top">
-            <div class="badge-row">
-                <span class="badge badge-region">${d.sido} ${d.gudong}</span>
-                ${regBadge(d.regStatus)}
-            </div>
-            <span class="badge" style="background:var(--surface2);color:var(${isUp ? '--red' : '--blue'})">${arrow} ${Math.abs(d.change).toFixed(1)}%</span>
-        </div>
-        <div class="card-name">${escHtml(d.아파트)}</div>
-        <div class="card-meta">${d.전용면적}㎡ · ${d.pyung}평 · 거래 ${d.count}건</div>
-        <div class="compare-grid">
-            <div class="compare-cell">
-                <div class="compare-cell-label">최근 실거래가</div>
-                <div class="compare-cell-value ${cls}">${(d.recent/10000).toFixed(2)}억</div>
-            </div>
-            <div class="compare-cell">
-                <div class="compare-cell-label">평균 거래가</div>
-                <div class="compare-cell-value">${(d.avg/10000).toFixed(2)}억</div>
-            </div>
-        </div>
-        <div class="trend-bar">
-            <div class="trend-fill" style="width:${ratio}%;background:var(${isUp ? '--red' : '--blue'})"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-top:.4rem;">
-            <span style="font-size:.6rem;color:var(--text3);font-weight:600">최저 ${(d.sortedPrices[0]/10000).toFixed(1)}억</span>
-            <span style="font-size:.6rem;color:var(--text3);font-weight:600">최고 ${(d.sortedPrices[d.sortedPrices.length-1]/10000).toFixed(1)}억</span>
-        </div>
-    </div>`;
+<div class="card" onclick="openHistory('${esc(d.아파트)}','${esc(d.sido)}','${esc(d.gudong)}')">
+  <div class="badge-row">
+    <span class="badge badge-region">${d.sido} ${d.gudong}</span>
+    ${regBadge(d.regStatus)}
+    <span class="diff-badge ${isOver?'over':'under'}" style="margin-left:auto">${arrow} ${absPct}%</span>
+  </div>
+  <div class="card-name">${d.아파트}</div>
+  <div class="card-meta">${d.전용면적}㎡ · ${d.pyung}평</div>
+  <div class="compare-grid">
+    <div class="cmp-cell">
+      <div class="cmp-label">실거래가</div>
+      <div class="cmp-value ${isOver?'up':'down'}">${f억(d.price)}</div>
+    </div>
+    <div class="cmp-cell">
+      <div class="cmp-label">KB 일반거래가</div>
+      <div class="cmp-value">${f억(kb.일반거래가)}</div>
+    </div>
+    <div class="cmp-cell">
+      <div class="cmp-label">KB 하한가</div>
+      <div class="cmp-value" style="color:var(--text2)">${f억(kb.하한가)}</div>
+    </div>
+    <div class="cmp-cell">
+      <div class="cmp-label">KB 상한가</div>
+      <div class="cmp-value" style="color:var(--text2)">${f억(kb.상한가)}</div>
+    </div>
+  </div>
+  <div class="trend-bar">
+    <div class="trend-fill" style="width:${fillPct}%;background:var(${isOver?'--red':'--green'})"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:.35rem">
+    <span style="font-size:.58rem;color:var(--text3);font-weight:600">KB 하한 ${f억(kb.하한가)}</span>
+    <span style="font-size:.58rem;color:var(--text3);font-weight:600">KB 상한 ${f억(kb.상한가)}</span>
+  </div>
+  <div style="text-align:right;margin-top:.5rem">
+    <button class="loan-btn" onclick="event.stopPropagation();openModal2('${esc(d.아파트)}',${d.price},${kb.일반거래가},'${d.regStatus}','${d.전용면적}')">💰 대출 계산</button>
+  </div>
+</div>`;
 }
 
-function escHtml(s) {
-    return String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-}
-
-function showEmpty(msg) {
-    const lines = msg.split('\n').map(l => `<p style="margin:.15rem 0">${l}</p>`).join('');
-    document.getElementById('card-list').innerHTML = `
-      <div class="empty-state">
-        <div class="icon">⚠️</div>
-        <div style="font-size:.82rem;font-weight:600;line-height:1.7;color:var(--text2)">${lines}</div>
-      </div>`;
-}
-
-// ─── 거래이력 모달 ────────────────────────────────────
+// ═══ 거래이력 모달 ════════════════════════════════════
 function openHistory(name, sido, gudong) {
-    const histories = allData
+    const list = allData
         .filter(d => d.아파트 === name && d.sido === sido && d.gudong === gudong)
-        .sort((a, b) =>
-            (b.계약년월 + String(b.계약일).padStart(2,'0')) -
-            (a.계약년월 + String(a.계약일).padStart(2,'0'))
-        );
+        .sort((a,b) => (b.계약년월 + String(b.계약일).padStart(2,'0')) - (a.계약년월 + String(a.계약일).padStart(2,'0')));
 
-    document.getElementById('history-apt-name').textContent = name;
-    document.getElementById('history-region').textContent   = `${sido} ${gudong}`;
+    el('history-apt-name').textContent = name;
+    el('history-region').textContent   = `${sido} ${gudong}`;
 
-    if (!histories.length) {
-        document.getElementById('history-list').innerHTML = '<p style="text-align:center;color:var(--text3);font-size:.8rem;padding:2rem">거래 내역이 없습니다</p>';
+    if (!list.length) {
+        el('history-list').innerHTML = '<p style="text-align:center;color:var(--text3);font-size:.8rem;padding:2rem">거래 내역이 없습니다</p>';
     } else {
-        const maxP = Math.max(...histories.map(d => d.price));
-        document.getElementById('history-list').innerHTML = histories.map(d => {
+        const maxP = Math.max(...list.map(d=>d.price));
+        const kb   = getKbPrice(name, list[0].전용면적);
+        let kbLine = '';
+        if (kb) kbLine = `<div style="background:var(--surface3);border:1px solid var(--border);border-radius:.5rem;padding:.5rem .875rem;margin-bottom:.75rem;font-size:.72rem;font-weight:700;color:var(--text2)">
+            KB시세 하한 <b style="color:var(--text1)">${f억(kb.하한가)}</b> · 일반 <b style="color:var(--blue)">${f억(kb.일반거래가)}</b> · 상한 <b style="color:var(--text1)">${f억(kb.상한가)}</b>
+        </div>`;
+        el('history-list').innerHTML = kbLine + list.map(d => {
             const ym  = String(d.계약년월);
             const dt  = `${ym.slice(0,4)}.${ym.slice(4)}.${String(d.계약일).padStart(2,'0')}`;
-            const isMax = d.price === maxP;
             return `
-            <div class="history-item">
-                <span class="history-date">${dt}</span>
-                <span class="history-area">${d.전용면적}㎡</span>
-                <span class="history-floor">${d.층}층</span>
-                <div style="text-align:right;flex:1">
-                    <div class="history-price" style="${isMax ? 'color:var(--red)' : ''}">${(d.price/10000).toFixed(2)}억</div>
-                    <div class="history-pyung">평당 ${d.pyungPrice.toLocaleString()}만</div>
-                </div>
-            </div>`;
+<div class="history-item">
+  <span class="history-date">${dt}</span>
+  <span class="history-area">${d.전용면적}㎡</span>
+  <span class="history-floor">${d.층}층</span>
+  <div style="text-align:right;flex:1">
+    <div class="history-price" style="${d.price===maxP?'color:var(--red)':''}">${f억(d.price)}</div>
+    <div class="history-pyung">평당 ${d.pyungPrice.toLocaleString()}만</div>
+  </div>
+</div>`;
         }).join('');
     }
-
     openModal('history-modal');
 }
 
-// ─── DSR / 대출 모달 ──────────────────────────────────
-function openDsrModal(name, price, regStatus) {
+// ═══ 대출/세금 복합 모달 ═════════════════════════════
+function openModal2(name, tradePrice, kbPrice, regStatus, area) {
     currentRegStatus = regStatus;
-    document.getElementById('modal-apt-name').textContent = name;
-    document.getElementById('calc-price').value = price;
+    currentKbPrice   = kbPrice || 0;
+
+    el('modal-apt-name').textContent = name;
 
     const isReg = regStatus.includes('투기');
-    const ltvStr = isReg ? '40%' : '70%';
-    const regEl  = document.getElementById('modal-reg-badge');
-    regEl.textContent = `${regStatus} · LTV ${ltvStr}`;
-    regEl.className   = `reg-badge-modal ${isReg ? 'regulated' : 'free'}`;
+    const badge = el('modal-reg-badge');
+    badge.textContent = `${regStatus} · LTV ${isReg?'40':'70'}%`;
+    badge.className   = `reg-badge-modal ${isReg?'regulated':'free'}`;
 
-    // 기본 탭
+    // KB vs 실거래가 비교 박스 업데이트
+    const baseForLtv = currentKbPrice > 0 ? Math.min(tradePrice, currentKbPrice) : tradePrice;
+    el('pcb-trade').textContent = f억(tradePrice);
+    el('pcb-kb').textContent    = currentKbPrice > 0 ? f억(currentKbPrice) : '—';
+
+    const tradeCell = el('pcb-cell-trade');
+    const kbCell    = el('pcb-cell-kb');
+    tradeCell.classList.remove('active-ltv');
+    kbCell.classList.remove('active-ltv');
+    if (currentKbPrice > 0) {
+        if (tradePrice <= currentKbPrice) { tradeCell.classList.add('active-ltv'); el('pcb-tag').style.display=''; }
+        else                              { kbCell.classList.add('active-ltv');    el('pcb-tag').style.display=''; }
+    } else {
+        el('pcb-tag').style.display = 'none';
+    }
+
+    el('calc-price').value   = tradePrice;
+    el('calc-kb-price').value = currentKbPrice || tradePrice;
+
+    // 탭 초기화
     document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.modal-panel').forEach(p => p.classList.add('hidden'));
     document.querySelector('.modal-tab[data-tab="loan"]').classList.add('active');
-    document.getElementById('panel-loan').classList.remove('hidden');
+    el('panel-loan').classList.remove('hidden');
     activeModalTab = 'loan';
 
     openModal('dsr-modal');
+    recalcAll();
+}
+
+// ═══ 계산 ════════════════════════════════════════════
+function recalcAll() {
     calculateLoan();
     calculateTax();
     calculateFee();
 }
 
-function openModal(id) {
-    document.getElementById(id).classList.add('open');
-    document.body.style.overflow = 'hidden';
+function calculateLoan() {
+    const income     = parseFloat(el('calc-income').value)    || 0;
+    const baseRate   = parseFloat(el('calc-base-rate').value)  || 0;
+    const stressRate = parseFloat(el('calc-stress').value)     || 0;
+    const tradeP     = parseFloat(el('calc-price').value)      || 0;
+    const kbP        = parseFloat(el('calc-kb-price').value)   || 0;
+    const isFirst    = el('calc-first-home').checked;
+
+    // ★ 핵심: 실거래가 vs KB시세 중 낮은 값을 담보평가 기준으로 사용
+    const evalBase   = (kbP > 0) ? Math.min(tradeP, kbP) : tradeP;
+
+    const totalRate  = (baseRate + stressRate) / 100;
+    let   ltvRatio   = 0.7;
+    if (!isFirst && currentRegStatus.includes('투기')) ltvRatio = 0.4;
+    if (isFirst) ltvRatio = 0.7; // 생애최초는 규제 무관 70%
+
+    const ltvLimit   = evalBase * ltvRatio;  // evalBase 기준 LTV
+    const dsrLimit   = income * 0.4;
+    const n = 360, r = totalRate / 12;
+    const factor     = r === 0 ? (1/n) : (r * Math.pow(1+r,n)) / (Math.pow(1+r,n) - 1);
+    const dsrMaxLoan = dsrLimit / (factor * 12);
+
+    let policyLimit  = 60000;
+    if (tradeP > 250000) policyLimit = 20000;
+    else if (tradeP > 150000) policyLimit = 40000;
+
+    const finalLoan  = Math.min(ltvLimit, dsrMaxLoan, policyLimit);
+    const needCash   = tradeP - finalLoan;
+
+    el('calc-result').textContent = fWon(finalLoan);
+    el('calc-cash').textContent   = '필요 자본금: ' + fWon(needCash);
+
+    // 평가기준 표시
+    const baseNote = el('calc-base-note');
+    if (kbP > 0 && kbP < tradeP) {
+        baseNote.textContent  = `⚠ KB시세(${f억(kbP)})가 낮아 KB시세 기준 LTV 적용`;
+        baseNote.style.color  = 'var(--amber)';
+    } else if (kbP > 0) {
+        baseNote.textContent  = `✓ 실거래가(${f억(tradeP)})를 담보평가 기준 적용`;
+        baseNote.style.color  = 'var(--green)';
+    } else {
+        baseNote.textContent  = 'KB 시세 정보 없음 — 실거래가 기준 적용';
+        baseNote.style.color  = 'var(--text3)';
+    }
 }
 
+function calculateTax() {
+    const price      = parseFloat(el('calc-price').value) || 0;
+    const isFirst    = el('calc-first-home').checked;
+    const hcEl       = document.getElementById('calc-house-count');
+    const houseCount = hcEl ? parseInt(hcEl.value) : 1;
+    const isReg      = currentRegStatus.includes('투기');
+    const priceW     = price * 10000; // 원
+
+    let rate;
+    if (isFirst) { rate = 0.01; }
+    else if (houseCount === 1) {
+        rate = price <= 6000 ? 0.01 : price <= 90000 ? 0.02 : 0.03;
+    } else if (houseCount === 2) {
+        rate = isReg ? 0.08 : 0.01;
+    } else {
+        rate = isReg ? 0.12 : 0.08;
+    }
+
+    const acq      = Math.floor(priceW * rate);
+    const edu      = Math.floor(acq * 0.1);
+    const special  = rate >= 0.02 ? Math.floor(priceW * 0.002) : 0;
+    const discount = isFirst ? Math.min(acq, 2000000) : 0;
+    const total    = acq + edu + special - discount;
+
+    el('tax-acquisition').textContent = fMan(acq);
+    el('tax-edu').textContent         = fMan(edu);
+    el('tax-special').textContent     = fMan(special);
+    el('tax-discount').textContent    = discount > 0 ? '-' + fMan(discount) : '-';
+    el('tax-total').textContent       = fMan(total);
+    el('tax-rate-note').textContent   = `적용 취득세율: ${(rate*100).toFixed(0)}%`;
+}
+
+function calculateFee() {
+    const price = parseFloat(el('calc-price').value) || 0;
+    let rate = .007, maxFee = null;
+    for (const t of BROKER_TABLE) {
+        if (price <= t.max) { rate = t.rate; maxFee = t.maxFee; break; }
+    }
+    let fee = Math.floor(price * rate) * 10000;
+    if (maxFee !== null) fee = Math.min(fee, maxFee);
+    const vat   = Math.floor(fee * 0.1);
+    const total = fee + vat;
+    el('fee-rate').textContent   = `${(rate*100).toFixed(1)}%`;
+    el('fee-amount').textContent = fMan(fee);
+    el('fee-vat').textContent    = fMan(vat);
+    el('fee-total').textContent  = fMan(total);
+}
+
+// ═══ 모달 열기/닫기 ══════════════════════════════════
+function openModal(id) {
+    el(id).classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
 function closeModal(id) {
-    document.getElementById(id).classList.remove('open');
+    el(id).classList.remove('open');
     document.body.style.overflow = '';
 }
 
-// ─── 대출 한도 계산 ───────────────────────────────────
-function calculateLoan() {
-    const income     = parseFloat(document.getElementById('calc-income').value)    || 0;
-    const baseRate   = parseFloat(document.getElementById('calc-base-rate').value)  || 0;
-    const stressRate = parseFloat(document.getElementById('calc-stress').value)     || 0;
-    const price      = parseFloat(document.getElementById('calc-price').value)      || 0;
-    const isFirst    = document.getElementById('calc-first-home').checked;
+// ═══ 유틸 ════════════════════════════════════════════
+function el(id)       { return document.getElementById(id); }
+function esc(s)       { return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function f억(v)       { return (v/10000).toFixed(2) + '억'; }
+function fMan(v)      { return Math.floor(v/10000).toLocaleString() + '만원'; }
+function fWon(v)      { return Math.floor(v/10000) + '억 ' + (Math.floor(v%10000)).toLocaleString() + '만원'; }
 
-    const totalRate = (baseRate + stressRate) / 100;
-    let ltvRatio    = 0.7;
-    if (!isFirst && currentRegStatus.includes('투기')) ltvRatio = 0.4;
-
-    const ltvLimit  = price * ltvRatio;
-    const dsrLimit  = income * 0.4;
-    const n = 360, r = totalRate / 12;
-    const factor = r === 0 ? (1 / n) : (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-    const dsrMaxLoan = dsrLimit / (factor * 12);
-
-    let policyLimit = 60000;
-    if (price > 250000) policyLimit = 20000;
-    else if (price > 150000) policyLimit = 40000;
-
-    const finalLoan = Math.min(ltvLimit, dsrMaxLoan, policyLimit);
-    const needCash  = price - finalLoan;
-
-    const fmt = v => `${Math.floor(v / 10000)}억 ${(Math.floor(v % 10000)).toLocaleString()}만원`;
-    document.getElementById('calc-result').textContent = fmt(finalLoan);
-    document.getElementById('calc-cash').textContent   = '필요 자본금: ' + fmt(needCash);
-}
-
-// ─── 취득세 계산 ──────────────────────────────────────
-function calculateTax() {
-    const price      = parseFloat(document.getElementById('calc-price').value) || 0;
-    const isFirst    = document.getElementById('calc-first-home').checked;
-    const houseCount = parseInt(document.getElementById('calc-house-count')?.value || '1');
-    const isReg      = currentRegStatus.includes('투기');
-
-    const priceW = price * 10000; // 원 단위 (price는 만원)
-
-    // 취득세율 결정
-    let rate;
-    if (isFirst) {
-        // 생애최초: 200만원 한도 감면 (취득세율 1%)
-        rate = 0.01;
-    } else if (houseCount === 1) {
-        if      (price <= 6000)  rate = 0.01;
-        else if (price <= 90000) rate = 0.02;
-        else                     rate = 0.03;
-    } else if (houseCount === 2) {
-        rate = isReg ? 0.08 : 0.01; // 조정 2주택=8%, 비조정=일반세율
-    } else {
-        rate = isReg ? 0.12 : 0.08; // 3주택이상 조정12%, 비조정8%
-    }
-
-    const acquisitionTax = Math.floor(priceW * rate);
-    const localEduTax    = Math.floor(acquisitionTax * 0.1);        // 지방교육세 10%
-    const specialTax     = rate >= 0.02 ? Math.floor(priceW * 0.002) : 0; // 농어촌특별세 0.2% (2%이상일때)
-
-    // 생애최초 감면 (취득세 200만원 한도)
-    let discount = 0;
-    if (isFirst) discount = Math.min(acquisitionTax, 2000000);
-
-    const totalTax = acquisitionTax + localEduTax + specialTax - discount;
-
-    document.getElementById('tax-acquisition').textContent = (acquisitionTax / 10000).toFixed(0) + '만원';
-    document.getElementById('tax-edu').textContent         = (localEduTax / 10000).toFixed(0) + '만원';
-    document.getElementById('tax-special').textContent     = (specialTax / 10000).toFixed(0) + '만원';
-    document.getElementById('tax-discount').textContent    = discount > 0 ? '-' + (discount / 10000).toFixed(0) + '만원' : '-';
-    document.getElementById('tax-total').textContent       = (totalTax / 10000).toFixed(1) + '만원';
-    document.getElementById('tax-rate-note').textContent   = `적용 취득세율: ${(rate * 100).toFixed(0)}%`;
-}
-
-// ─── 중개수수료 계산 ──────────────────────────────────
-function calculateFee() {
-    const price = parseFloat(document.getElementById('calc-price').value) || 0;
-    // price는 만원 단위
-    const priceW = price; // 만원 그대로
-
-    let rate = 0.007, maxFee = null;
-    for (const tier of BROKERAGE_RATE.매매) {
-        if (priceW <= tier.max) {
-            rate   = tier.rate;
-            maxFee = tier.maxFee;
-            break;
-        }
-    }
-
-    let fee = Math.floor(priceW * rate) * 10000; // 원
-    if (maxFee !== null) fee = Math.min(fee, maxFee);
-
-    const vat       = Math.floor(fee * 0.1);
-    const totalFee  = fee + vat;
-
-    document.getElementById('fee-rate').textContent    = `${(rate * 100).toFixed(1)}%`;
-    document.getElementById('fee-amount').textContent  = (fee / 10000).toFixed(1) + '만원';
-    document.getElementById('fee-vat').textContent     = (vat / 10000).toFixed(1) + '만원';
-    document.getElementById('fee-total').textContent   = (totalFee / 10000).toFixed(1) + '만원';
+function showEmpty(msg) {
+    const lines = msg.split('\n').map(l=>`<p>${l}</p>`).join('');
+    el('card-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-msg">${lines}</div></div>`;
 }
