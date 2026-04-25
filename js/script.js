@@ -216,3 +216,18 @@ function calculateDsr() {
     document.getElementById('calc-result').innerText = 
         Math.floor(maxLoan / 10000) + "억 " + (Math.floor(maxLoan % 10000)).toLocaleString() + "만원";
 }
+
+// 규제 지역 정의 (실제 법령 기준 업데이트 필요)
+const regulatedAreas = {
+    "서울특별시 강남구": "투기지역/투기과열지구",
+    "서울특별시 서초구": "투기지역/투기과열지구",
+    "서울특별시 송파구": "투기지역/투기과열지구",
+    "서울특별시 용산구": "투기지역/투기과열지구"
+};
+
+// 카드 렌더링 함수 내부에 추가
+function getRegulationTag(sigungu) {
+    const status = regulatedAreas[sigungu] || "비규제지역";
+    const color = status.includes("투기") ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500";
+    return `<span class="px-2 py-1 ${color} text-[10px] font-bold rounded-lg ml-2">${status}</span>`;
+}
