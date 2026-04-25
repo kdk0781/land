@@ -74,6 +74,16 @@
                     </div>
                     <input type="number" id="calc-price" class="w-full p-3 bg-slate-100 rounded-xl font-bold text-lg outline-none text-slate-700">
                 </div>
+				<div class="flex justify-between items-center p-3 bg-blue-50 rounded-xl mb-4 border border-blue-100">
+					<div>
+						<span class="text-sm font-bold text-blue-800">생애최초 주택구입</span>
+						<p class="text-[9px] text-blue-600 font-medium">규제지역 무관 LTV 70% 적용</p>
+					</div>
+					<label class="relative inline-flex items-center cursor-pointer">
+						<input type="checkbox" id="calc-first-home" class="sr-only peer">
+						<div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+					</label>
+				</div>
                 <div>
                     <label class="block text-[10px] font-bold text-slate-400 mb-1">연간 소득 (만원)</label>
                     <input type="number" id="calc-income" value="6000" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
@@ -275,16 +285,20 @@
 			const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
 			const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
 			const price = parseFloat(document.getElementById('calc-price').value) || 0;
+			const isFirstHome = document.getElementById('calc-first-home').checked; // 생애최초 여부
 			
 			if (price === 0) return;
 
-			// 1. 합산 금리 및 기간 (30년 상환)
+			// 1. 금리 및 기간 (30년 상환)
 			const totalRate = (baseRate + stressRate) / 100;
 			const n = 30 * 12; 
 			const r = totalRate / 12;
 
-			// 2. LTV 한도 (규제 40% / 비규제 70%)
-			const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
+			// 2. LTV 한도 결정 로직
+			let ltvRatio = 0.7; // 기본 70%
+			if (!isFirstHome && currentRegStatus.includes("투기")) {
+				ltvRatio = 0.4; // 생애최초가 아니고 규제지역일 때만 40%
+			}
 			const ltvLimit = price * ltvRatio;
 			
 			// 3. DSR 기반 한도 (DSR 40%)
@@ -292,25 +306,24 @@
 			const factor = r === 0 ? (1/n) : (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 			const dsrMaxLoan = dsrLimit / (factor * 12);
 
-			// 4. 정부 정책 한도 (Absolute Cap) 적용
-			let policyLimit = 60000; // 15억 이하: 최대 6억
-			if (price > 250000) {
-				policyLimit = 20000; // 25억 초과: 최대 2억
-			} else if (price > 150000) {
-				policyLimit = 40000; // 15억 초과 ~ 25억 이하: 최대 4억
-			}
+			// 4. 정부 정책 상한액 (15억/25억 기준)
+			let policyLimit = 60000; 
+			if (price > 250000) policyLimit = 20000;
+			else if (price > 150000) policyLimit = 40000;
 			
-			// 5. 최종 한도 결정: LTV, DSR, 정책 상한액 중 최소값
+			// 5. 최종 한도: LTV, DSR, 정책 상한액 중 최소값
 			const finalLoan = Math.min(ltvLimit, dsrMaxLoan, policyLimit);
 			const needCash = price - finalLoan;
 			
-			// 화면 결과 표시
+			// 결과 업데이트
 			document.getElementById('calc-result').innerText = 
 				Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
 			document.getElementById('calc-cash').innerText = 
 				"필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
 		}
 
+		// 토글 변경 시에도 즉시 계산되도록 이벤트 리스너 추가
+		document.getElementById('calc-first-home').addEventListener('change', calculateDsr);
         document.getElementById('calc-income').addEventListener('input', calculateDsr);
         document.getElementById('calc-base-rate').addEventListener('input', calculateDsr);
         document.getElementById('calc-stress').addEventListener('change', calculateDsr);
