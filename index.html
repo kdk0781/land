@@ -326,7 +326,8 @@
             document.getElementById('modal-apt-name').innerText = name;
             document.getElementById('calc-price').value = price;
             
-            const ltvRatio = regStatus.includes("투기") ? "50%" : "70%";
+            // 💡 수정됨: 투기/조정대상 지역이면 LTV 40%, 아니면 70% 텍스트 표시
+            const ltvRatio = regStatus.includes("투기") ? "40%" : "70%";
             document.getElementById('modal-reg-badge').innerText = `${regStatus} (LTV ${ltvRatio})`;
             
             document.getElementById('dsr-modal').classList.remove('hidden');
@@ -334,16 +335,14 @@
             calculateDsr();
         }
 
-        function closeDsrModal() {
-            document.getElementById('dsr-modal').classList.add('hidden');
-            document.getElementById('dsr-modal').classList.remove('flex');
-        }
+        // closeDsrModal() 함수는 그대로 둡니다.
 
         function calculateDsr() {
             const income = document.getElementById('calc-income').value || 0;
             const stressRate = parseFloat(document.getElementById('calc-stress').value);
             
-            const ltvRatio = currentRegStatus.includes("투기") ? 0.5 : 0.7;
+            // 💡 수정됨: 규제 지역 실제 계산 로직 (0.5 -> 0.4 로 변경)
+            const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
             const ltvLimit = currentCalcPrice * ltvRatio;
             
             const totalRate = (4.0 + stressRate) / 100;
