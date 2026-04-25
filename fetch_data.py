@@ -3,7 +3,10 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import time
-import sys
+import urllib3
+
+# 공공기관 API SSL 인증서 경고 무시
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 일반 인증키(Decoding)
 API_KEY = '4dc9ae5186b8259cfa06a26e9aa19e5c2758fb51804d6a48165b7f8ae499d50a'
@@ -21,100 +24,83 @@ months_to_fetch = [
     (today.replace(day=1) - timedelta(days=1)).strftime('%Y%m')
 ]
 
-# 연속 실패 횟수를 체크하기 위한 변수
-consecutive_errors = 0
-
-def fetch_land_data(lawd_cd, deal_ymd):
-    global consecutive_errors
-    # http -> https 로 변경
+# 1. 매매 데이터 수집 함수
+def fetch_trade_data(lawd_cd, deal_ymd):
     url = f"https://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/getRTMSDataSvcAptTradeDev?serviceKey={API_KEY}&LAWD_CD={lawd_cd}&DEAL_YMD={deal_ymd}"
     try:
-        # verify=False 를 추가해 공공기관 인증서 오류 무시
         response = requests.get(url, timeout=10, verify=False)
         root = ET.fromstring(response.content)
-        
-        result_code = root.find('.//resultCode')
-        if result_code is not None and result_code.text != '00':
-            return []
-            
         items = []
         for item in root.findall('.//item'):
             data = {child.tag: child.text.strip() if child.text else '' for child in item}
             data['지역코드'] = lawd_cd 
             items.append(data)
-            
-        consecutive_errors = 0 # 성공하면 에러 카운트 초기화
         return items
-        
-    except requests.exceptions.RequestException as e:
-        print(f"네트워크/서버 오류 발생 ({lawd_cd}): {e}")
-        consecutive_errors += 1
-        return []
-    except Exception as e:
-        print(f"데이터 파싱 오류 ({lawd_cd}): {e}")
-        return []
+    except: return []
 
-all_data = []
-print("데이터 수집을 시작합니다. (약 3~5분 소요 예상)")
-for name, code in DISTRICT_CODES.items():
-    if consecutive_errors >= 5:
-        print("🚨 공공데이터 서버 응답이 5회 연속 실패했습니다. 서버 점검 중일 확률이 높으므로 스크립트를 강제 종료합니다.")
-        break # 서버가 죽었을 때 불필요한 반복 방지
-        
-    for month in months_to_fetch:
-        all_data.extend(fetch_land_data(code, month))
-        time.sleep(0.5)
-
-if all_data:
-    df = pd.DataFrame(all_data)
-    df = df.drop_duplicates()
-    df.to_csv('apt_trade_data.csv', index=False, encoding='utf-8-sig')
-    print(f"성공! 총 {len(df)}건의 데이터를 저장했습니다.")
-else:
-    print("수집된 데이터가 없습니다.")
-    df = pd.DataFrame(columns=['아파트', '거래금액', '년', '월', '일', '법정동', '지역코드']) 
-    df.to_csv('apt_trade_data.csv', index=False, encoding='utf-8-sig')
-
+# 2. 전월세 데이터 수집 함수 (전세만 필터링)
 def fetch_rent_data(lawd_cd, deal_ymd):
-    # API 엔드포인트가 'AptRentDev'로 다릅니다.
     url = f"https://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/getRTMSDataSvcAptRentDev?serviceKey={API_KEY}&LAWD_CD={lawd_cd}&DEAL_YMD={deal_ymd}"
-    
     try:
         response = requests.get(url, timeout=10, verify=False)
         root = ET.fromstring(response.content)
-        
         items = []
         for item in root.findall('.//item'):
             data = {child.tag: child.text.strip() if child.text else '' for child in item}
-            
-            # 🎯 '전세' 데이터만 필터링 (월세 제외)
-            if data.get('전월세구분') == '전세':
+            if data.get('전월세구분') == '전세': # 전세만 가져오기
                 data['지역코드'] = lawd_cd
                 items.append(data)
         return items
-    except Exception as e:
-        return []
+    except: return []
 
-# ---------------------------------------------------------
-# [데이터 병합 및 가공 로직] - pandas 활용
-# ---------------------------------------------------------
-# 1. 매매 데이터프레임(df_trade)과 전세 데이터프레임(df_rent) 생성
-# 2. 전세 데이터는 같은 아파트/면적이라도 여러 건이므로 '최근 전세가 평균'을 구합니다.
-df_rent_avg = df_rent.groupby(['법정동', '단지명', '전용면적(㎡)'])['보증금액'].mean().reset_index()
+# --- 데이터 수집 실행 ---
+all_trade_data = []
+all_rent_data = []
 
-# 3. 매매 데이터에 전세 데이터를 병합 (Merge)
-merged_df = pd.merge(
-    df_trade, 
-    df_rent_avg, 
-    how='left', 
-    left_on=['법정동', '단지명', '전용면적(㎡)'], 
-    right_on=['법정동', '단지명', '전용면적(㎡)']
-)
+print("데이터 수집을 시작합니다. (매매/전세 동시 수집으로 약 5~10분 소요)")
+for name, code in DISTRICT_CODES.items():
+    for month in months_to_fetch:
+        all_trade_data.extend(fetch_trade_data(code, month))
+        all_rent_data.extend(fetch_rent_data(code, month))
+        time.sleep(0.5) # 서버 과부하 방지
 
-# 4. 갭(Gap)과 전세가율 계산
-# 보증금액이 있는(매칭된) 데이터만 계산
-merged_df['전세가'] = merged_df['보증금액'].fillna(0)
-merged_df['갭_금액'] = merged_df['거래금액'] - merged_df['전세가']
-merged_df['전세가율'] = (merged_df['전세가'] / merged_df['거래금액']) * 100
+# --- 데이터 가공 및 병합 (Merge) ---
+if all_trade_data:
+    df_trade = pd.DataFrame(all_trade_data)
+    df_rent = pd.DataFrame(all_rent_data) if all_rent_data else pd.DataFrame()
 
-# 최종 apt_trade_data.csv 에 '전세가', '갭_금액', '전세가율' 컬럼이 추가되어 저장됨
+    # 데이터 정리 (공백 제거 및 숫자 변환)
+    df_trade['아파트'] = df_trade['아파트'].str.strip()
+    df_trade['법정동'] = df_trade['법정동'].str.strip()
+    df_trade['거래금액_num'] = df_trade['거래금액'].str.replace(',', '').astype(float)
+    df_trade['전용면적_round'] = df_trade['전용면적'].astype(float).round(1) # 면적 소수점 1자리 통일
+
+    if not df_rent.empty:
+        df_rent['아파트'] = df_rent['아파트'].str.strip()
+        df_rent['법정동'] = df_rent['법정동'].str.strip()
+        df_rent['보증금액'] = df_rent['보증금액'].str.replace(',', '').astype(float)
+        df_rent['전용면적_round'] = df_rent['전용면적'].astype(float).round(1)
+        
+        # 동일 아파트/면적의 최근 전세가 평균 구하기
+        df_rent_avg = df_rent.groupby(['법정동', '아파트', '전용면적_round'])['보증금액'].mean().reset_index()
+        
+        # 매매 데이터에 전세 데이터 병합 (Left Join)
+        merged_df = pd.merge(df_trade, df_rent_avg, how='left', on=['법정동', '아파트', '전용면적_round'])
+    else:
+        merged_df = df_trade
+        merged_df['보증금액'] = 0
+
+    # 갭(Gap) 및 전세가율 계산
+    merged_df['전세가'] = merged_df['보증금액'].fillna(0)
+    merged_df['갭_금액'] = merged_df['거래금액_num'] - merged_df['전세가']
+    merged_df['전세가율'] = merged_df.apply(lambda x: (x['전세가'] / x['거래금액_num'] * 100) if x['거래금액_num'] > 0 else 0, axis=1)
+
+    # 필요 없는 임시 컬럼 삭제
+    merged_df = merged_df.drop(columns=['전용면적_round', '보증금액', '거래금액_num'])
+    merged_df = merged_df.drop_duplicates()
+
+    # 최종 CSV 저장
+    merged_df.to_csv('apt_trade_data.csv', index=False, encoding='utf-8-sig')
+    print(f"🎉 성공! 총 {len(merged_df)}건의 갭투자 병합 데이터를 저장했습니다.")
+else:
+    print("수집된 데이터가 없습니다.")
