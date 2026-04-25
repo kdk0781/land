@@ -12,7 +12,7 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .tab-btn { white-space: nowrap; padding: 0.6rem 1.2rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 800; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid #f1f5f9; color: #94a3b8; background: #f8fafc;}
-        .tab-btn.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);}
+        .tab-btn.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3); }
         .scale-in { animation: scaleIn 0.3s ease-out; }
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
     </style>
@@ -20,7 +20,7 @@
 <body class="bg-slate-50 text-slate-900">
     <div id="loader" class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white">
         <div class="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="text-slate-600 font-bold">25만 건 실거래 데이터 렌더링 중...</p>
+        <p class="text-slate-600 font-bold">실거래 데이터 분석 중...</p>
     </div>
 
     <div class="max-w-2xl mx-auto min-h-screen pb-20 bg-white shadow-sm">
@@ -34,7 +34,6 @@
                     <span id="total-count" class="text-blue-600 font-black text-xl">0</span><span class="text-slate-500 text-xs font-bold ml-1">건</span>
                 </div>
             </div>
-
             <div class="flex overflow-x-auto gap-2 pb-2 hide-scrollbar" id="category-tabs">
                 <button class="tab-btn active" data-mode="latest">⚡ 최신 거래</button>
                 <button class="tab-btn" data-mode="volume">🔥 거래량 순위</button>
@@ -58,49 +57,54 @@
         <main class="p-4 space-y-4 bg-slate-50" id="trade-list"></main>
     </div>
 
-	<div id="dsr-modal" class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4">
-		<div class="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl">
-			<div class="p-6 border-b flex justify-between items-center">
-				<h2 class="text-xl font-extrabold text-slate-800 tracking-tighter" id="modal-title">DSR 한도 계산기</h2>
-				<button onclick="closeDsrModal()" class="text-slate-400 hover:text-slate-600">
-					<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-				</button>
-			</div>
-			<div class="p-6 space-y-4">
-				<div>
-					<label class="block text-[10px] font-bold text-slate-400 mb-1">매매 가격 (만원)</label>
-					<input type="number" id="calc-price" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
-				</div>
-				<div>
-					<label class="block text-[10px] font-bold text-slate-400 mb-1">연간 소득 (만원)</label>
-					<input type="number" id="calc-income" value="6000" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
-				</div>
-				<div class="grid grid-cols-2 gap-3">
-					<div>
-						<label class="block text-[10px] font-bold text-slate-400 mb-1">기본 금리 (%)</label>
-						<input type="number" id="calc-base-rate" value="4.0" step="0.1" class="w-full p-3 border rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
-					</div>
-					<div>
-						<label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 DSR</label>
-						<select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none text-sm">
-							<option value="1.15">주기형 (1.15%)</option>
-							<option value="1.50">혼합형 (1.50%)</option>
-							<option value="2.87">변동형 (2.87%)</option>
-						</select>
-					</div>
-				</div>
-				<div class="bg-blue-600 p-6 rounded-2xl text-white mt-2 shadow-lg">
-					<div class="text-[10px] opacity-70 mb-1 font-bold uppercase tracking-widest">Estimated Loan Limit (30Y)</div>
-					<div id="calc-result" class="text-2xl font-black tracking-tight">0원</div>
-					<div id="calc-cash" class="text-[11px] mt-2 font-bold text-blue-100">필요 자본금: 0원</div>
-				</div>
-			</div>
-		</div>
-	</div>
+    <div id="dsr-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col scale-in">
+            <div class="p-6 border-b flex justify-between items-center bg-slate-50">
+                <div>
+                    <h2 class="text-lg font-extrabold text-slate-800">대출 한도 시뮬레이션</h2>
+                    <p id="modal-apt-name" class="text-xs text-blue-600 font-bold mt-0.5"></p>
+                </div>
+                <button onclick="closeDsrModal()" class="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400">✕</button>
+            </div>
+            <div class="p-6 overflow-y-auto space-y-4 text-sm">
+                <div>
+                    <div class="flex justify-between items-end mb-1">
+                        <label class="block text-[10px] font-bold text-slate-400">매매 가격 (만원)</label>
+                        <span id="modal-reg-badge" class="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded"></span>
+                    </div>
+                    <input type="number" id="calc-price" class="w-full p-3 bg-slate-100 rounded-xl font-bold text-lg outline-none text-slate-700">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1">연간 소득 (만원)</label>
+                    <input type="number" id="calc-income" value="6000" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 mb-1">기본 대출 금리 (%)</label>
+                        <input type="number" id="calc-base-rate" value="4.0" step="0.1" class="w-full p-3 border rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 금리 적용</label>
+                        <select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none text-sm">
+                            <option value="1.15">주기형 (1.15%)</option>
+                            <option value="1.50">혼합형 (1.50%)</option>
+                            <option value="2.87">변동형 (2.87%)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="bg-blue-600 p-6 rounded-2xl text-white mt-2 shadow-lg">
+                    <div class="text-[10px] opacity-70 mb-1 font-bold uppercase tracking-widest">최종 대출 가능액 (30년 상환 기준)</div>
+                    <div id="calc-result" class="text-2xl font-black tracking-tight">0원</div>
+                    <div id="calc-cash" class="text-sm font-bold text-blue-200 mt-2">필요 자본금: 0원</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         let allData = [];
         let currentMode = 'latest';
+        let currentRegStatus = "비규제지역";
 
         const regulatedSido = ["서울특별시"]; 
         const regulatedGyeonggi = [
@@ -115,48 +119,28 @@
             header: true,
             complete: function(results) {
                 allData = results.data.filter(row => row.아파트 && row.거래금액_n).map(row => {
-                const price = parseFloat(row.거래금액_n);
-                const area = parseFloat(row.전용면적);
-                const pyung = area / 3.3058;
-                const pyungPrice = Math.round(price / pyung);
-                
-                const sido = row.sido || "미분류";
-                const sigungu = row.sigungu || "";
-                const dong = row.dong || "";
-                
-                // 2026년 기준 규제 지역 판별 로직으로 교체
-                let regStatus = "비규제지역";
-                if (regulatedSido.includes(sido)) {
-                    regStatus = "투기/조정대상"; // 서울 전역
-                } else if (sido === "경기도" && regulatedGyeonggi.includes(sigungu)) {
-                    regStatus = "투기/조정대상"; // 경기 12개 지역
-                }
-            
-                const yyyymm = String(row.계약년월 || "");
-                const year = yyyymm.substring(0, 4);
-                const month = yyyymm.substring(4, 6);
-                const day = String(row.계약일 || "").padStart(2, '0');
-                
-                return { 
-                    ...row, 
-                    price, 
-                    pyungPrice, 
-                    pyung: pyung.toFixed(1),
-                    sido: sido,
-                    sigungu: sigungu,
-                    dong: dong,
-                    gudong: `${sigungu} ${dong}`.trim(),
-                    regStatus: regStatus, // 업데이트된 상태값 반영
-                    gap: parseFloat(row.gap || 0),
-                    jeonseRatio: parseFloat(row.jeonseRatio || 0),
-                    jeonsePrice: parseFloat(row.jeonsePrice || 0),
-                    year: year,
-                    month: month,
-                    day: day,
-                    dateValue: parseInt(year + month + day)
-                };
-            });
-                
+                    const price = parseFloat(row.거래금액_n);
+                    const area = parseFloat(row.전용면적);
+                    const pyung = area / 3.3058;
+                    const pyungPrice = Math.round(price / pyung);
+                    const sido = row.sido || "미분류";
+                    const sigungu = row.sigungu || "";
+                    const dong = row.dong || "";
+                    
+                    let regStatus = "비규제지역";
+                    if (regulatedSido.includes(sido)) regStatus = "투기/조정대상";
+                    else if (sido === "경기도" && regulatedGyeonggi.includes(sigungu)) regStatus = "투기/조정대상";
+
+                    return { 
+                        ...row, 
+                        price, pyungPrice, pyung: pyung.toFixed(1),
+                        sido, sigungu, dong, gudong: `${sigungu} ${dong}`.trim(),
+                        regStatus,
+                        gap: parseFloat(row.gap || 0),
+                        jeonseRatio: parseFloat(row.jeonseRatio || 0),
+                        jeonsePrice: parseFloat(row.jeonsePrice || 0)
+                    };
+                });
                 initSidoSelect();
                 document.getElementById('total-count').innerText = allData.length.toLocaleString();
                 document.getElementById('loader').style.display = 'none';
@@ -167,35 +151,26 @@
         function initSidoSelect() {
             const sidos = [...new Set(allData.map(d => d.sido))].filter(s => s !== "미분류").sort();
             const sidoSelect = document.getElementById('sido-select');
-            
             sidos.forEach(s => {
                 const opt = document.createElement('option');
-                opt.value = s;
-                opt.innerText = s;
+                opt.value = s; opt.innerText = s;
                 sidoSelect.appendChild(opt);
             });
-
             sidoSelect.addEventListener('change', function() {
-                const selectedSido = this.value;
                 const regionSelect = document.getElementById('region-select');
-                
                 regionSelect.innerHTML = '<option value="all">구/동 전체</option>';
-                
-                if (selectedSido === 'all') {
-                    regionSelect.disabled = true;
-                } else {
+                if (this.value === 'all') regionSelect.disabled = true;
+                else {
                     regionSelect.disabled = false;
-                    const gudongs = [...new Set(allData.filter(d => d.sido === selectedSido).map(d => d.gudong))].sort();
+                    const gudongs = [...new Set(allData.filter(d => d.sido === this.value).map(d => d.gudong))].sort();
                     gudongs.forEach(g => {
                         const opt = document.createElement('option');
-                        opt.value = g;
-                        opt.innerText = g;
+                        opt.value = g; opt.innerText = g;
                         regionSelect.appendChild(opt);
                     });
                 }
                 renderList();
             });
-
             document.getElementById('region-select').addEventListener('change', renderList);
             document.getElementById('search-input').addEventListener('input', renderList);
         }
@@ -222,8 +197,6 @@
                 return matchSido && matchGudong && matchSearch;
             });
 
-            listDiv.innerHTML = '';
-
             if (currentMode === 'volume') {
                 const grouped = {};
                 filtered.forEach(item => {
@@ -233,41 +206,22 @@
                     if (item.price > grouped[key].maxP) grouped[key].maxP = item.price;
                 });
                 filtered = Object.values(grouped).sort((a, b) => b.count - a.count);
-            } else if (currentMode === 'top_price') {
-                filtered.sort((a, b) => b.price - a.price);
-            } else if (currentMode === 'gap_invest') {
-                filtered = filtered.filter(d => d.jeonseRatio > 0).sort((a, b) => b.jeonseRatio - a.jeonseRatio);
-            } else {
-                filtered.sort((a, b) => b.dateValue - a.dateValue);
-            }
+            } else if (currentMode === 'top_price') filtered.sort((a, b) => b.price - a.price);
+            else if (currentMode === 'gap_invest') filtered = filtered.filter(d => d.jeonseRatio > 0).sort((a, b) => b.jeonseRatio - a.jeonseRatio);
+            else filtered.sort((a, b) => (b.계약년월 + b.계약일) - (a.계약년월 + a.계약일));
 
-            listDiv.innerHTML = filtered.slice(0, 50).map((item, idx) => {
-                if (currentMode === 'volume') return renderVolumeCard(item, idx);
-                if (currentMode === 'gap_invest') return renderGapCard(item, idx);
-                return renderDefaultCard(item);
-            }).join('');
-        }
-
-        function getRegBadge(status) {
-            if(status === "비규제지역") return `<span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg ml-1">비규제</span>`;
-            return `<span class="px-2 py-1 bg-red-100 text-red-600 text-[10px] font-extrabold rounded-lg ml-1 animate-pulse">${status}</span>`;
-        }
-
-        function renderDefaultCard(item) {
-            return `
+            listDiv.innerHTML = filtered.slice(0, 50).map((item, idx) => `
                 <div class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
                     <div class="flex justify-between items-start mb-2">
                         <div>
                             <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.sido} ${item.gudong}</span>
-                            ${getRegBadge(item.regStatus)}
+                            <span class="px-2 py-1 ${item.regStatus.includes('투기') ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'} text-[10px] font-extrabold rounded-lg ml-1">${item.regStatus}</span>
                         </div>
-                        <span class="text-[10px] font-bold text-slate-300">${item.year}.${item.month}.${item.day}</span>
+                        <span class="text-[10px] font-bold text-slate-300">${item.계약년월}.${item.계약일}</span>
                     </div>
                     <h3 class="text-lg font-extrabold text-slate-800 tracking-tighter">${item.아파트}</h3>
                     <div class="mt-4 flex justify-between items-end">
-                        <div class="text-xs font-bold text-slate-400 leading-relaxed">
-                            ${item.전용면적}㎡ (${item.pyung}평) | ${item.층}층
-                        </div>
+                        <div class="text-xs font-bold text-slate-400 leading-relaxed">${item.전용면적}㎡ (${item.pyung}평) | ${item.층}층</div>
                         <div class="text-right">
                             <div class="text-xl font-black text-blue-700">${(item.price/10000).toFixed(1)}억</div>
                             <div class="text-[10px] font-bold text-slate-300 mt-1">평당 ${item.pyungPrice.toLocaleString()}만</div>
@@ -275,68 +229,15 @@
                     </div>
                     <button onclick="openDsrModal('${item.아파트}', ${item.price}, '${item.regStatus}')" class="w-full mt-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-extrabold text-[10px] hover:bg-blue-100 transition-colors">💰 LTV/DSR 대출 한도 계산</button>
                 </div>
-            `;
+            `).join('');
         }
-
-        function renderVolumeCard(item, idx) {
-            return `
-                <div class="bg-white p-5 rounded-3xl border border-blue-50 shadow-sm ${idx < 3 ? 'border-l-4 border-l-blue-600' : ''}">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-[10px] font-black text-blue-600 uppercase tracking-widest">${idx + 1}nd Ranking</span>
-                        <span class="px-2 py-1 bg-blue-600 text-white text-[10px] font-black rounded-lg">거래 ${item.count}건</span>
-                    </div>
-                    <h3 class="text-lg font-extrabold text-slate-800">${item.아파트}</h3>
-                    <p class="text-[10px] font-bold text-slate-400 mt-1">${item.sido} ${item.gudong}</p>
-                </div>
-            `;
-        }
-
-        function renderGapCard(item, idx) {
-            const gapUk = (item.gap / 10000).toFixed(1);
-            return `
-                <div class="bg-white p-5 rounded-3xl border border-emerald-100 shadow-sm relative overflow-hidden">
-                    <div class="absolute top-0 right-0 bg-emerald-500 text-white px-3 py-1 text-[10px] font-black rounded-bl-xl italic">
-                        전세가율 ${Number(item.jeonseRatio).toFixed(1)}%
-                    </div>
-                    <div class="mb-1 flex items-center mt-2">
-                        <p class="text-[10px] font-extrabold text-slate-400">${item.sido} ${item.gudong}</p>
-                        ${getRegBadge(item.regStatus)}
-                    </div>
-                    <h3 class="text-lg font-extrabold text-slate-800 mb-4">${idx+1}. ${item.아파트}</h3>
-                    <div class="flex justify-between items-center p-3 bg-emerald-50 rounded-2xl">
-                        <div class="text-center flex-1">
-                            <p class="text-[9px] font-black text-slate-400 mb-1">매매가</p>
-                            <p class="font-bold text-slate-700 text-xs">${(item.price/10000).toFixed(1)}억</p>
-                        </div>
-                        <div class="w-px h-6 bg-emerald-200"></div>
-                        <div class="text-center flex-1">
-                            <p class="text-[9px] font-black text-slate-400 mb-1">평균 전세가</p>
-                            <p class="font-bold text-slate-700 text-xs">${(item.jeonsePrice/10000).toFixed(1)}억</p>
-                        </div>
-                        <div class="w-px h-6 bg-emerald-200"></div>
-                        <div class="text-center flex-1">
-                            <p class="text-[9px] font-black text-emerald-600 mb-1">투자금(GAP)</p>
-                            <p class="font-black text-emerald-600">${gapUk}억</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        let currentCalcPrice = 0;
-        let currentRegStatus = "비규제지역";
 
         function openDsrModal(name, price, regStatus) {
-            currentCalcPrice = price;
             currentRegStatus = regStatus;
-            
             document.getElementById('modal-apt-name').innerText = name;
             document.getElementById('calc-price').value = price;
-            
-            // 💡 수정됨: 투기/조정대상 지역이면 LTV 40%, 아니면 70% 텍스트 표시
             const ltvRatio = regStatus.includes("투기") ? "40%" : "70%";
             document.getElementById('modal-reg-badge').innerText = `${regStatus} (LTV ${ltvRatio})`;
-            
             document.getElementById('dsr-modal').classList.remove('hidden');
             document.getElementById('dsr-modal').classList.add('flex');
             calculateDsr();
@@ -347,59 +248,33 @@
             document.getElementById('dsr-modal').classList.remove('flex');
         }
 
-		function calculateDsr() {
-			// 1. 입력값 가져오기
-			const income = parseFloat(document.getElementById('calc-income').value) || 0;
-			const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
-			const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
-			const price = parseFloat(document.getElementById('calc-price').value) || 0;
-			
-			// 가격이 없으면 계산 중단
-			if (price === 0) return;
+        function calculateDsr() {
+            const income = parseFloat(document.getElementById('calc-income').value) || 0;
+            const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
+            const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
+            const price = parseFloat(document.getElementById('calc-price').value) || 0;
+            
+            const totalRate = (baseRate + stressRate) / 100;
+            const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
+            const ltvLimit = price * ltvRatio;
+            
+            const dsrLimit = income * 0.4;
+            const n = 30 * 12; // 30년 상환
+            const r = totalRate / 12;
+            const factor = r === 0 ? (1/n) : (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+            const dsrMaxLoan = dsrLimit / (factor * 12);
+            
+            const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
+            const needCash = price - finalLoan;
+            
+            document.getElementById('calc-result').innerText = Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
+            document.getElementById('calc-cash').innerText = "필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
+        }
 
-			// 2. 금리 및 기간 설정 (30년 상환)
-			const totalRate = (baseRate + stressRate) / 100;
-			const n = 30 * 12; // 💡 30년 고정
-			const r = totalRate / 12;
-
-			// 3. LTV 한도 적용 (규제지역 40% / 비규제지역 70%)
-			// currentRegStatus 변수가 없는 경우를 대비해 안전하게 처리
-			const regStatus = typeof currentRegStatus !== 'undefined' ? currentRegStatus : "";
-			const ltvRatio = regStatus.includes("투기") ? 0.4 : 0.7;
-			const ltvLimit = price * ltvRatio;
-			
-			// 4. DSR 기반 최대 대출액 계산 (DSR 40%)
-			const dsrLimit = income * 0.4;
-			// 원리금균등상환 공식
-			const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-			const dsrMaxLoan = dsrLimit / (factor * 12);
-			
-			// 5. 최종 한도 결정 (LTV vs DSR 중 최소값)
-			const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
-			const needCash = price - finalLoan;
-			
-			// 6. 결과 표시
-			const resultElement = document.getElementById('calc-result');
-			const cashElement = document.getElementById('calc-cash');
-			
-			if (resultElement) {
-				resultElement.innerText = Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
-			}
-			if (cashElement) {
-				cashElement.innerText = "필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
-			}
-		}
-
-		// 이벤트 리스너 등록 (HTML 로드 후 실행되도록 설정)
-		document.addEventListener('DOMContentLoaded', function() {
-			const inputs = ['calc-income', 'calc-base-rate', 'calc-stress', 'calc-price'];
-			inputs.forEach(id => {
-				const el = document.getElementById(id);
-				if (el) {
-					el.addEventListener(id === 'calc-stress' ? 'change' : 'input', calculateDsr);
-				}
-			});
-		});
+        document.getElementById('calc-income').addEventListener('input', calculateDsr);
+        document.getElementById('calc-base-rate').addEventListener('input', calculateDsr);
+        document.getElementById('calc-stress').addEventListener('change', calculateDsr);
+        document.getElementById('calc-price').addEventListener('input', calculateDsr);
     </script>
 </body>
 </html>
