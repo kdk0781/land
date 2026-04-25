@@ -1,21 +1,30 @@
 let allData = [];
 let currentMode = 'latest';
 
-// 1. 데이터 로드 및 초기 지역 필터 생성
+// 현재 법령 기준 투기과열지구 및 조정대상지역 (강남 3구 + 용산)
+const regulatedAreas = {
+    "서울특별시 강남구": "투기/조정대상",
+    "서울특별시 서초구": "투기/조정대상",
+    "서울특별시 송파구": "투기/조정대상",
+    "서울특별시 용산구": "투기/조정대상"
+};
+
 Papa.parse("apt_trade_data.csv", {
     download: true,
     header: true,
     complete: function(results) {
-        allData = results.data.filter(row => row.아파트 && row.거래금액).map(row => {
-            const price = parseInt(row.거래금액);
+        allData = results.data.filter(row => row.아파트 && row.거래금액_n).map(row => {
+            const price = parseFloat(row.거래금액_n);
             const area = parseFloat(row.전용면적);
             const pyung = area / 3.3058;
             const pyungPrice = Math.round(price / pyung);
             
-            // 시군구 텍스트 분리 (예: "서울특별시 강남구 논현동")
-            const addr = row.시군구 ? row.시군구.split(' ') : ["미분류"];
-            const sido = addr[0];
-            const gudong = addr.length > 1 ? addr.slice(1).join(' ') : "";
+            const sido = row.시도 || "미분류";
+            const sigungu = row.시군구 || "";
+            const dong = row.법정동 || "";
+            
+            const fullSigungu = `${sido} ${sigungu}`.trim();
+            const regStatus = regulatedAreas[fullSigungu] || "비규제지역";
             
             return { 
                 ...row, 
@@ -23,7 +32,13 @@ Papa.parse("apt_trade_data.csv", {
                 pyungPrice, 
                 pyung: pyung.toFixed(1),
                 sido: sido,
-                gudong: gudong
+                sigungu: sigungu,
+                dong: dong,
+                gudong: `${sigungu} ${dong}`.trim(),
+                regStatus: regStatus,
+                gap: parseFloat(row.갭 || 0),
+                jeonseRatio: parseFloat(row.전세가율 || 0),
+                jeonsePrice: parseFloat(row.보증금 || 0)
             };
         });
         
@@ -34,9 +49,8 @@ Papa.parse("apt_trade_data.csv", {
     }
 });
 
-// 2. 계층형 지역 선택 기능
 function initSidoSelect() {
-    const sidos = [...new Set(allData.map(d => d.sido))].sort();
+    const sidos = [...new Set(allData.map(d => d.sido))].filter(s => s !== "미분류").sort();
     const sidoSelect = document.getElementById('sido-select');
     
     sidos.forEach(s => {
@@ -71,10 +85,8 @@ function initSidoSelect() {
     document.getElementById('search-input').addEventListener('input', renderList);
 }
 
-// 3. 탭 메뉴 이벤트
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', function() {
-        if(this.disabled) return;
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         this.classList.add('active');
         currentMode = this.dataset.mode;
@@ -82,7 +94,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// 4. 리스트 렌더링 로직
 function renderList() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase();
     const selectedSido = document.getElementById('sido-select').value;
@@ -98,7 +109,6 @@ function renderList() {
 
     listDiv.innerHTML = '';
 
-    // 모드별 데이터 정렬 및 가공
     if (currentMode === 'volume') {
         const grouped = {};
         filtered.forEach(item => {
@@ -111,7 +121,8 @@ function renderList() {
     } else if (currentMode === 'top_price') {
         filtered.sort((a, b) => b.price - a.price);
     } else if (currentMode === 'gap_invest') {
-        filtered = filtered.filter(d => d.전세가율 > 0).sort((a, b) => b.전세가율 - a.전세가율);
+        // 전세가율 0% 초과인 진짜 갭 데이터만 필터링
+        filtered = filtered.filter(d => d.jeonseRatio > 0).sort((a, b) => b.jeonseRatio - a.jeonseRatio);
     } else {
         filtered.sort((a, b) => (b.년+b.월+b.일) - (a.년+a.월+a.일));
     }
@@ -123,12 +134,19 @@ function renderList() {
     }).join('');
 }
 
-// 5. 카드 UI 템플릿들
+function getRegBadge(status) {
+    if(status === "비규제지역") return `<span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg ml-1">비규제</span>`;
+    return `<span class="px-2 py-1 bg-red-100 text-red-600 text-[10px] font-extrabold rounded-lg ml-1 animate-pulse">${status}</span>`;
+}
+
 function renderDefaultCard(item) {
     return `
         <div class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
             <div class="flex justify-between items-start mb-2">
-                <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.sido} ${item.gudong}</span>
+                <div>
+                    <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.sido} ${item.gudong}</span>
+                    ${getRegBadge(item.regStatus)}
+                </div>
                 <span class="text-[10px] font-bold text-slate-300">${item.년}.${item.월}.${item.일}</span>
             </div>
             <h3 class="text-lg font-extrabold text-slate-800 tracking-tighter">${item.아파트}</h3>
@@ -141,14 +159,14 @@ function renderDefaultCard(item) {
                     <div class="text-[10px] font-bold text-slate-300 mt-1">평당 ${item.pyungPrice.toLocaleString()}만</div>
                 </div>
             </div>
-            <button onclick="openDsrModal('${item.아파트}', ${item.price})" class="w-full mt-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-extrabold text-[10px] hover:bg-blue-100 transition-colors">LOAN SIMULATOR</button>
+            <button onclick="openDsrModal('${item.아파트}', ${item.price}, '${item.regStatus}')" class="w-full mt-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-extrabold text-[10px] hover:bg-blue-100 transition-colors">💰 LTV/DSR 대출 한도 계산</button>
         </div>
     `;
 }
 
 function renderVolumeCard(item, idx) {
     return `
-        <div class="bg-white p-5 rounded-3xl border border-blue-50 shadow-sm ${idx < 3 ? 'rank-top' : ''}">
+        <div class="bg-white p-5 rounded-3xl border border-blue-50 shadow-sm ${idx < 3 ? 'border-l-4 border-l-blue-600' : ''}">
             <div class="flex justify-between items-center mb-2">
                 <span class="text-[10px] font-black text-blue-600 uppercase tracking-widest">${idx + 1}nd Ranking</span>
                 <span class="px-2 py-1 bg-blue-600 text-white text-[10px] font-black rounded-lg">거래 ${item.count}건</span>
@@ -160,13 +178,16 @@ function renderVolumeCard(item, idx) {
 }
 
 function renderGapCard(item, idx) {
-    const gapUk = (item.갭_금액 / 10000).toFixed(1);
+    const gapUk = (item.gap / 10000).toFixed(1);
     return `
         <div class="bg-white p-5 rounded-3xl border border-emerald-100 shadow-sm relative overflow-hidden">
             <div class="absolute top-0 right-0 bg-emerald-500 text-white px-3 py-1 text-[10px] font-black rounded-bl-xl italic">
-                RATIO ${Number(item.전세가율).toFixed(1)}%
+                전세가율 ${Number(item.jeonseRatio).toFixed(1)}%
             </div>
-            <p class="text-[10px] font-extrabold text-slate-400 mb-1">${item.sido} ${item.gudong}</p>
+            <div class="mb-1 flex items-center">
+                <p class="text-[10px] font-extrabold text-slate-400">${item.sido} ${item.gudong}</p>
+                ${getRegBadge(item.regStatus)}
+            </div>
             <h3 class="text-lg font-extrabold text-slate-800 mb-4">${idx+1}. ${item.아파트}</h3>
             <div class="flex justify-between items-center p-3 bg-emerald-50 rounded-2xl">
                 <div class="text-center flex-1">
@@ -175,8 +196,8 @@ function renderGapCard(item, idx) {
                 </div>
                 <div class="w-px h-6 bg-emerald-200"></div>
                 <div class="text-center flex-1">
-                    <p class="text-[9px] font-black text-slate-400 mb-1">전세가</p>
-                    <p class="font-bold text-slate-700 text-xs">${(item.전세가/10000).toFixed(1)}억</p>
+                    <p class="text-[9px] font-black text-slate-400 mb-1">평균 전세가</p>
+                    <p class="font-bold text-slate-700 text-xs">${(item.jeonsePrice/10000).toFixed(1)}억</p>
                 </div>
                 <div class="w-px h-6 bg-emerald-200"></div>
                 <div class="text-center flex-1">
@@ -188,10 +209,21 @@ function renderGapCard(item, idx) {
     `;
 }
 
-// 6. DSR 계산기 함수
-function openDsrModal(name, price) {
+// 글로벌 변수 저장용
+let currentCalcPrice = 0;
+let currentRegStatus = "비규제지역";
+
+function openDsrModal(name, price, regStatus) {
+    currentCalcPrice = price;
+    currentRegStatus = regStatus;
+    
     document.getElementById('modal-apt-name').innerText = name;
     document.getElementById('calc-price').value = price;
+    
+    // 규제 지역에 따른 LTV 뱃지 표시
+    const ltvRatio = regStatus.includes("투기") ? "50%" : "70%";
+    document.getElementById('modal-reg-badge').innerText = `${regStatus} (LTV ${ltvRatio})`;
+    
     document.getElementById('dsr-modal').classList.remove('hidden');
     document.getElementById('dsr-modal').classList.add('flex');
     calculateDsr();
@@ -205,29 +237,28 @@ function closeDsrModal() {
 function calculateDsr() {
     const income = document.getElementById('calc-income').value || 0;
     const stressRate = parseFloat(document.getElementById('calc-stress').value);
+    
+    // 1. LTV 한도 계산
+    const ltvRatio = currentRegStatus.includes("투기") ? 0.5 : 0.7;
+    const ltvLimit = currentCalcPrice * ltvRatio;
+    
+    // 2. DSR 한도 계산 (40년 기준)
     const totalRate = (4.0 + stressRate) / 100;
     const dsrLimit = income * 0.4;
-    
     const n = 40 * 12;
     const r = totalRate / 12;
     const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    const dsrMaxLoan = dsrLimit / (factor * 12);
     
-    const maxLoan = dsrLimit / (factor * 12);
+    // 3. 최종 대출 한도 (MIN 적용)
+    const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
+    const needCash = currentCalcPrice - finalLoan;
+    
     document.getElementById('calc-result').innerText = 
-        Math.floor(maxLoan / 10000) + "억 " + (Math.floor(maxLoan % 10000)).toLocaleString() + "만원";
+        Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
+    document.getElementById('calc-cash').innerText = 
+        "필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
 }
 
-// 규제 지역 정의 (실제 법령 기준 업데이트 필요)
-const regulatedAreas = {
-    "서울특별시 강남구": "투기지역/투기과열지구",
-    "서울특별시 서초구": "투기지역/투기과열지구",
-    "서울특별시 송파구": "투기지역/투기과열지구",
-    "서울특별시 용산구": "투기지역/투기과열지구"
-};
-
-// 카드 렌더링 함수 내부에 추가
-function getRegulationTag(sigungu) {
-    const status = regulatedAreas[sigungu] || "비규제지역";
-    const color = status.includes("투기") ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500";
-    return `<span class="px-2 py-1 ${color} text-[10px] font-bold rounded-lg ml-2">${status}</span>`;
-}
+document.getElementById('calc-income').addEventListener('input', calculateDsr);
+document.getElementById('calc-stress').addEventListener('change', calculateDsr);
