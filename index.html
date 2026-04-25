@@ -335,7 +335,10 @@
             calculateDsr();
         }
 
-        // closeDsrModal() 함수는 그대로 둡니다.
+        function closeDsrModal() {
+            document.getElementById('dsr-modal').classList.add('hidden');
+            document.getElementById('dsr-modal').classList.remove('flex');
+        }
 
         function calculateDsr() {
             const income = document.getElementById('calc-income').value || 0;
