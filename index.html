@@ -110,6 +110,31 @@
                     return { ...row, price, pyungPrice, pyung: pyung.toFixed(1) };
                 });
                 
+                // 1. 데이터 가공 시 행정구역 분리
+                allData = results.data.map(row => {
+                    const addr = row.시군구.split(' '); // "서울특별시 강남구 논현동" 분리
+                    return {
+                        ...row,
+                        sido: addr[0],
+                        sigungu: addr[1],
+                        dong: addr[2],
+                        fullGudong: `${addr[1]} - ${addr[2]}` // "강남구 - 논현동" 형태
+                    };
+                });
+                
+                // 2. 첫 번째 셀렉트(시/도) 채우기
+                const sidos = [...new Set(allData.map(i => i.sido))].sort();
+                // sido-select에 option 추가...
+                
+                // 3. 시/도 변경 시 구/동 리스트 업데이트 이벤트
+                document.getElementById('sido-select').addEventListener('change', (e) => {
+                    const selectedSido = e.target.value;
+                    const filteredGudongs = [...new Set(allData.filter(i => i.sido === selectedSido).map(i => i.fullGudong))].sort();
+                    
+                    // gudong-select의 내용을 비우고 filteredGudongs로 다시 채우기
+                    renderGudongOptions(filteredGudongs);
+                });
+                
                 document.getElementById('total-count').innerText = allData.length.toLocaleString();
                 document.getElementById('loader').style.display = 'none';
 
