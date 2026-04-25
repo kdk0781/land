@@ -3,79 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>부동산 이상 행동 감지 대시보드</title>
+    <title>부동산 시장 이상 행동 감지 대시보드</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
 </head>
-<body class="bg-gray-50 text-gray-900">
-    <div class="max-w-md mx-auto min-h-screen pb-20">
-        <header class="p-6 bg-white border-b sticky top-0 z-10">
-            <h1 class="text-xl font-bold text-blue-600">Market Anomaly Detection</h1>
-            <p class="text-sm text-gray-500">성동·광진·중랑 실거래 모니터링</p>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+    <div class="max-w-2xl mx-auto min-h-screen pb-20">
+        
+        <header class="p-6 bg-white border-b sticky top-0 z-10 shadow-sm flex justify-between items-end">
+            <div>
+                <h1 class="text-2xl font-extrabold text-blue-700 tracking-tight">Market Anomaly</h1>
+                <p class="text-sm text-slate-500 mt-1">수도권 아파트 실거래 모니터링</p>
+            </div>
+            <div class="text-right">
+                <p class="text-xs text-slate-400">수집된 데이터</p>
+                <p id="total-count" class="text-xl font-bold text-slate-800">로딩중...</p>
+            </div>
         </header>
 
-        <main class="p-4 space-y-4">
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                <h2 class="text-sm font-semibold text-gray-400 mb-1">최근 업데이트 거래</h2>
-                <div id="summary-value" class="text-3xl font-bold">집계 중...</div>
+        <div class="p-4 sticky top-[88px] z-10 bg-slate-50/90 backdrop-blur-sm border-b border-slate-200">
+            <div class="flex gap-2 mb-3">
+                <input type="text" id="search-input" placeholder="아파트명 또는 법정동 검색..." class="w-full px-4 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm text-sm">
             </div>
-
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                <h3 class="font-bold mb-4">지역별 거래 비중</h3>
-                <canvas id="districtChart"></canvas>
+            <div class="flex gap-2">
+                <select id="sort-select" class="w-1/2 px-4 py-2 rounded-xl border border-slate-300 bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="latest">최신 거래순</option>
+                    <option value="price_asc">단가(평당가) 낮은순</option>
+                    <option value="price_desc">단가(평당가) 높은순</option>
+                    <option value="total_desc">총액 높은순</option>
+                </select>
             </div>
+        </div>
 
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                <h3 class="font-bold mb-4">최신 거래 목록</h3>
-                <div id="trade-list" class="space-y-3 text-sm">
+        <main class="p-4">
+            <div id="trade-list" class="space-y-3">
+                <div class="animate-pulse flex space-x-4 bg-white p-5 rounded-2xl shadow-sm">
+                    <div class="flex-1 space-y-4 py-1">
+                        <div class="h-4 bg-slate-200 rounded w-3/4"></div>
+                        <div class="space-y-2"><div class="h-4 bg-slate-200 rounded"></div></div>
                     </div>
+                </div>
+            </div>
+            
+            <div id="empty-state" class="hidden text-center py-10 text-slate-500">
+                조건에 맞는 거래 내역이 없습니다.
             </div>
         </main>
     </div>
 
     <script>
-        // CSV 데이터 읽기
+        let allData = [];
+
+        // 1. CSV 데이터 가져오기
         Papa.parse("apt_trade_data.csv", {
             download: true,
             header: true,
             complete: function(results) {
-                const data = results.data.filter(row => row.아파트); // 빈 줄 제거
-                updateUI(data);
+                // 빈 줄 제거 및 데이터 가공 (평당가 계산)
+                allData = results.data.filter(row => row.아파트 && row.거래금액).map(row => {
+                    // 거래금액 콤마 제거 및 정수 변환
+                    const priceStr = row.거래금액.replace(/,/g, '').trim();
+                    const price = parseInt(priceStr, 10);
+                    
+                    // 전용면적을 평으로 변환 (소수점 1자리)
+                    const areaSqm = parseFloat(row.전용면적);
+                    const pyung = areaSqm / 3.3058;
+                    
+                    // 평당가 계산 (만원 단위)
+                    const pricePerPyung = pyung > 0 ? Math.round(price / pyung) : 0;
+                    
+                    return {
+                        ...row,
+                        정수금액: price,
+                        평: pyung.toFixed(1),
+                        평당가: pricePerPyung,
+                        // 날짜 포맷 (예: 2024.04.15)
+                        거래일: `${row.년}.${row.월.padStart(2, '0')}.${row.일.padStart(2, '0')}`
+                    };
+                });
+
+                document.getElementById('total-count').innerText = allData.length.toLocaleString() + "건";
+                renderList(); // 초기 렌더링
             }
         });
 
-        function updateUI(data) {
-            // 요약 수치
-            document.getElementById('summary-value').innerText = data.length + "건";
+        // 2. 검색 및 필터 이벤트 리스너
+        document.getElementById('search-input').addEventListener('input', renderList);
+        document.getElementById('sort-select').addEventListener('change', renderList);
 
-            // 리스트 업데이트
+        // 3. 리스트 렌더링 함수
+        function renderList() {
             const listDiv = document.getElementById('trade-list');
-            listDiv.innerHTML = data.slice(0, 10).map(item => `
-                <div class="flex justify-between items-center border-b pb-2">
-                    <div>
-                        <div class="font-medium">${item.아파트}</div>
-                        <div class="text-xs text-gray-400">${item.년}.${item.월}.${item.일} | ${item.전용면적}㎡</div>
+            const emptyState = document.getElementById('empty-state');
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const sortType = document.getElementById('sort-select').value;
+
+            // 검색 필터링
+            let filteredData = allData.filter(item => 
+                item.아파트.toLowerCase().includes(searchTerm) || 
+                (item.법정동 && item.법정동.toLowerCase().includes(searchTerm))
+            );
+
+            // 정렬
+            if (sortType === 'latest') {
+                filteredData.sort((a, b) => new Date(b.거래일) - new Date(a.거래일));
+            } else if (sortType === 'price_asc') {
+                filteredData.sort((a, b) => a.평당가 - b.평당가);
+            } else if (sortType === 'price_desc') {
+                filteredData.sort((a, b) => b.평당가 - a.평당가);
+            } else if (sortType === 'total_desc') {
+                filteredData.sort((a, b) => b.정수금액 - a.정수금액);
+            }
+
+            // 너무 많은 렌더링 방지 (상위 100개만 노출)
+            const displayData = filteredData.slice(0, 100);
+
+            if (displayData.length === 0) {
+                listDiv.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            listDiv.innerHTML = displayData.map(item => {
+                // 금액 포맷팅 (예: 1억 2,000만)
+                let priceFormatted = "";
+                if (item.정수금액 >= 10000) {
+                    const uk = Math.floor(item.정수금액 / 10000);
+                    const man = item.정수금액 % 10000;
+                    priceFormatted = man > 0 ? `${uk}억 ${man.toLocaleString()}만` : `${uk}억`;
+                } else {
+                    priceFormatted = `${item.정수금액.toLocaleString()}만`;
+                }
+
+                return `
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <span class="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded-md mb-1">${item.법정동}</span>
+                            <h3 class="font-bold text-slate-800 text-lg leading-tight">${item.아파트}</h3>
+                        </div>
+                        <div class="text-right">
+                            <div class="font-extrabold text-blue-600 text-lg">${priceFormatted}</div>
+                        </div>
                     </div>
-                    <div class="text-blue-600 font-bold">${item.거래금액.trim()}만</div>
+                    <div class="flex justify-between items-end text-sm text-slate-500">
+                        <div class="space-y-1">
+                            <div>📐 ${item.전용면적}㎡ (약 ${item.평}평)</div>
+                            <div>📅 ${item.거래일} ${item.층 ? `| 🏢 ${item.층}층` : ''}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs bg-red-50 text-red-600 px-2 py-1 rounded font-semibold inline-block">
+                                평당 ${item.평당가.toLocaleString()}만원
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            `).join('');
-
-            // 차트 데이터 가공 (구별 통계)
-            const districts = { '11200': 0, '11215': 0, '11260': 0 };
-            data.forEach(item => { if(districts[item.지역코드] !== undefined) districts[item.지역코드]++; });
-
-            new Chart(document.getElementById('districtChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: ['성동구', '광진구', '중랑구'],
-                    datasets: [{
-                        data: [districts['11200'], districts['11215'], districts['11260']],
-                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b']
-                    }]
-                },
-                options: { plugins: { legend: { position: 'bottom' } } }
-            });
+                `;
+            }).join('');
         }
     </script>
 </body>
