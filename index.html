@@ -101,54 +101,60 @@
         let allData = [];
         let currentMode = 'latest';
 
-        const regulatedAreas = {
-            "서울특별시 강남구": "투기/조정대상",
-            "서울특별시 서초구": "투기/조정대상",
-            "서울특별시 송파구": "투기/조정대상",
-            "서울특별시 용산구": "투기/조정대상"
-        };
+        const regulatedSido = ["서울특별시"]; 
+        const regulatedGyeonggi = [
+            "과천시", "광명시", "의왕시", "하남시", 
+            "성남수정구", "성남중원구", "성남분당구", 
+            "수원장안구", "수원팔달구", "수원영통구", 
+            "안양동안구", "용인수지구"
+        ];
 
         Papa.parse("apt_trade_data.csv", {
             download: true,
             header: true,
             complete: function(results) {
                 allData = results.data.filter(row => row.아파트 && row.거래금액_n).map(row => {
-                    const price = parseFloat(row.거래금액_n);
-                    const area = parseFloat(row.전용면적);
-                    const pyung = area / 3.3058;
-                    const pyungPrice = Math.round(price / pyung);
-                    
-                    const sido = row.sido || "미분류";
-                    const sigungu = row.sigungu || "";
-                    const dong = row.dong || "";
-                    const fullSigungu = `${sido} ${sigungu}`.trim();
-                    const regStatus = regulatedAreas[fullSigungu] || "비규제지역";
-
-                    // 날짜 데이터 파싱 (예: 계약년월 "202604", 계약일 "1" -> "01")
-                    const yyyymm = String(row.계약년월 || "");
-                    const year = yyyymm.substring(0, 4);
-                    const month = yyyymm.substring(4, 6);
-                    const day = String(row.계약일 || "").padStart(2, '0');
-                    
-                    return { 
-                        ...row, 
-                        price, 
-                        pyungPrice, 
-                        pyung: pyung.toFixed(1),
-                        sido: sido,
-                        sigungu: sigungu,
-                        dong: dong,
-                        gudong: `${sigungu} ${dong}`.trim(),
-                        regStatus: regStatus,
-                        gap: parseFloat(row.gap || 0),
-                        jeonseRatio: parseFloat(row.jeonseRatio || 0),
-                        jeonsePrice: parseFloat(row.jeonsePrice || 0),
-                        year: year,
-                        month: month,
-                        day: day,
-                        dateValue: parseInt(year + month + day) // 정렬용
-                    };
-                });
+                const price = parseFloat(row.거래금액_n);
+                const area = parseFloat(row.전용면적);
+                const pyung = area / 3.3058;
+                const pyungPrice = Math.round(price / pyung);
+                
+                const sido = row.sido || "미분류";
+                const sigungu = row.sigungu || "";
+                const dong = row.dong || "";
+                
+                // 2026년 기준 규제 지역 판별 로직으로 교체
+                let regStatus = "비규제지역";
+                if (regulatedSido.includes(sido)) {
+                    regStatus = "투기/조정대상"; // 서울 전역
+                } else if (sido === "경기도" && regulatedGyeonggi.includes(sigungu)) {
+                    regStatus = "투기/조정대상"; // 경기 12개 지역
+                }
+            
+                const yyyymm = String(row.계약년월 || "");
+                const year = yyyymm.substring(0, 4);
+                const month = yyyymm.substring(4, 6);
+                const day = String(row.계약일 || "").padStart(2, '0');
+                
+                return { 
+                    ...row, 
+                    price, 
+                    pyungPrice, 
+                    pyung: pyung.toFixed(1),
+                    sido: sido,
+                    sigungu: sigungu,
+                    dong: dong,
+                    gudong: `${sigungu} ${dong}`.trim(),
+                    regStatus: regStatus, // 업데이트된 상태값 반영
+                    gap: parseFloat(row.gap || 0),
+                    jeonseRatio: parseFloat(row.jeonseRatio || 0),
+                    jeonsePrice: parseFloat(row.jeonsePrice || 0),
+                    year: year,
+                    month: month,
+                    day: day,
+                    dateValue: parseInt(year + month + day)
+                };
+            });
                 
                 initSidoSelect();
                 document.getElementById('total-count').innerText = allData.length.toLocaleString();
