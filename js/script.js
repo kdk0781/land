@@ -40,44 +40,104 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ─── 데이터 로드 ──────────────────────────────────────
-function loadData() {
-    Papa.parse('apt_trade_data.csv', {
-        download: true,
-        header: true,
-        complete: results => {
-            allData = results.data
-                .filter(r => r.아파트 && r.거래금액_n)
-                .map(r => {
-                    const price = parseFloat(r.거래금액_n);
-                    const area  = parseFloat(r.전용면적);
-                    const pyung = area / 3.3058;
-                    return {
-                        ...r,
-                        price,
-                        pyung:      pyung.toFixed(1),
-                        pyungPrice: Math.round(price / pyung),
-                        sido:       r.sido   || '미분류',
-                        sigungu:    r.sigungu || '',
-                        dong:       r.dong   || '',
-                        gudong:     `${r.sigungu || ''} ${r.dong || ''}`.trim(),
-                        regStatus:  getRegStatus(r.sido, r.sigungu),
-                        gap:        parseFloat(r.gap       || 0),
-                        jeonseRatio:parseFloat(r.jeonseRatio || 0),
-                        jeonsePrice:parseFloat(r.jeonsePrice || 0),
-                    };
-                });
+function setLoaderText(msg) {
+    const el = document.querySelector('.loader-text');
+    if (el) el.textContent = msg;
+}
 
-            initSidoSelect();
-            updateStats();
-            document.getElementById('total-count').textContent = allData.length.toLocaleString();
-            document.getElementById('loader').style.display = 'none';
-            renderList();
-        },
-        error: () => {
-            document.getElementById('loader').style.display = 'none';
-            showEmpty('데이터를 불러올 수 없습니다. CSV 파일을 확인하세요.');
-        }
-    });
+function hideLoader() {
+    const loader = document.getElementById('loader');
+    if (loader) loader.style.display = 'none';
+}
+
+function loadData() {
+    const CSV_PATH = 'apt_trade_data.csv';
+
+    // 안전장치: 30초 후에도 로더가 있으면 에러 처리
+    const safetyTimer = setTimeout(() => {
+        hideLoader();
+        showEmpty('⏱ 데이터 로딩 시간이 초과됐습니다.\nCSV 파일이 올바른 경로에 있는지 확인하세요.\n(예상 경로: land/apt_trade_data.csv)');
+    }, 30000);
+
+    setLoaderText('CSV 파일 확인 중...');
+
+    // Step 1: fetch로 파일 존재 여부 먼저 확인
+    fetch(CSV_PATH, { method: 'HEAD' })
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            setLoaderText('데이터 다운로드 중...');
+            return fetch(CSV_PATH);
+        })
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.text();
+        })
+        .then(csvText => {
+            setLoaderText('실거래 데이터 파싱 중...');
+
+            // Step 2: 텍스트로 파싱 (더 안정적)
+            Papa.parse(csvText, {
+                header: true,
+                skipEmptyLines: true,
+                complete: results => {
+                    clearTimeout(safetyTimer);
+
+                    // BOM 제거 처리 (한글 CSV 헤더 버그 방지)
+                    const firstKey = results.meta.fields && results.meta.fields[0];
+                    const hasBom   = firstKey && firstKey.charCodeAt(0) === 0xFEFF;
+
+                    allData = results.data
+                        .filter(r => {
+                            const name  = hasBom ? r['\uFEFFsido'] : r.sido;
+                            const apt   = r['아파트'] || r['\uFEFF아파트'];
+                            return apt && r['거래금액_n'];
+                        })
+                        .map(r => {
+                            // BOM이 붙은 경우 sido 키 보정
+                            const sido_raw = r.sido || r['\uFEFFsido'] || '미분류';
+                            const price = parseFloat(r['거래금액_n']);
+                            const area  = parseFloat(r['전용면적']);
+                            const pyung = area / 3.3058;
+                            const sigungu = r.sigungu || '';
+                            const dong    = r.dong    || '';
+                            return {
+                                ...r,
+                                price,
+                                pyung:       pyung.toFixed(1),
+                                pyungPrice:  Math.round(price / pyung),
+                                sido:        sido_raw,
+                                sigungu,
+                                dong,
+                                gudong:      `${sigungu} ${dong}`.trim(),
+                                regStatus:   getRegStatus(sido_raw, sigungu),
+                                gap:         parseFloat(r.gap          || 0),
+                                jeonseRatio: parseFloat(r.jeonseRatio  || 0),
+                                jeonsePrice: parseFloat(r.jeonsePrice  || 0),
+                                아파트:      r['아파트'] || r['\uFEFF아파트'] || '',
+                            };
+                        });
+
+                    initSidoSelect();
+                    updateStats();
+                    document.getElementById('total-count').textContent = allData.length.toLocaleString();
+                    hideLoader();
+                    renderList();
+                },
+                error: err => {
+                    clearTimeout(safetyTimer);
+                    hideLoader();
+                    showEmpty(`CSV 파싱 오류: ${err.message}`);
+                }
+            });
+        })
+        .catch(err => {
+            clearTimeout(safetyTimer);
+            hideLoader();
+            const msg = err.message.includes('404') || err.message.includes('403')
+                ? '❌ CSV 파일을 찾을 수 없습니다.\napt_trade_data.csv 파일이 index.html과 같은 폴더에 있어야 합니다.'
+                : `❌ 네트워크 오류: ${err.message}`;
+            showEmpty(msg);
+        });
 }
 
 function initSidoSelect() {
@@ -375,10 +435,11 @@ function escHtml(s) {
 }
 
 function showEmpty(msg) {
+    const lines = msg.split('\n').map(l => `<p style="margin:.15rem 0">${l}</p>`).join('');
     document.getElementById('card-list').innerHTML = `
       <div class="empty-state">
         <div class="icon">⚠️</div>
-        <p>${msg}</p>
+        <div style="font-size:.82rem;font-weight:600;line-height:1.7;color:var(--text2)">${lines}</div>
       </div>`;
 }
 
