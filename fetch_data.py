@@ -74,3 +74,47 @@ else:
     print("수집된 데이터가 없습니다.")
     df = pd.DataFrame(columns=['아파트', '거래금액', '년', '월', '일', '법정동', '지역코드']) 
     df.to_csv('apt_trade_data.csv', index=False, encoding='utf-8-sig')
+
+def fetch_rent_data(lawd_cd, deal_ymd):
+    # API 엔드포인트가 'AptRentDev'로 다릅니다.
+    url = f"https://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/getRTMSDataSvcAptRentDev?serviceKey={API_KEY}&LAWD_CD={lawd_cd}&DEAL_YMD={deal_ymd}"
+    
+    try:
+        response = requests.get(url, timeout=10, verify=False)
+        root = ET.fromstring(response.content)
+        
+        items = []
+        for item in root.findall('.//item'):
+            data = {child.tag: child.text.strip() if child.text else '' for child in item}
+            
+            # 🎯 '전세' 데이터만 필터링 (월세 제외)
+            if data.get('전월세구분') == '전세':
+                data['지역코드'] = lawd_cd
+                items.append(data)
+        return items
+    except Exception as e:
+        return []
+
+# ---------------------------------------------------------
+# [데이터 병합 및 가공 로직] - pandas 활용
+# ---------------------------------------------------------
+# 1. 매매 데이터프레임(df_trade)과 전세 데이터프레임(df_rent) 생성
+# 2. 전세 데이터는 같은 아파트/면적이라도 여러 건이므로 '최근 전세가 평균'을 구합니다.
+df_rent_avg = df_rent.groupby(['법정동', '단지명', '전용면적(㎡)'])['보증금액'].mean().reset_index()
+
+# 3. 매매 데이터에 전세 데이터를 병합 (Merge)
+merged_df = pd.merge(
+    df_trade, 
+    df_rent_avg, 
+    how='left', 
+    left_on=['법정동', '단지명', '전용면적(㎡)'], 
+    right_on=['법정동', '단지명', '전용면적(㎡)']
+)
+
+# 4. 갭(Gap)과 전세가율 계산
+# 보증금액이 있는(매칭된) 데이터만 계산
+merged_df['전세가'] = merged_df['보증금액'].fillna(0)
+merged_df['갭_금액'] = merged_df['거래금액'] - merged_df['전세가']
+merged_df['전세가율'] = (merged_df['전세가'] / merged_df['거래금액']) * 100
+
+# 최종 apt_trade_data.csv 에 '전세가', '갭_금액', '전세가율' 컬럼이 추가되어 저장됨
