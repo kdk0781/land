@@ -270,28 +270,46 @@
             document.getElementById('dsr-modal').classList.remove('flex');
         }
 
-        function calculateDsr() {
-            const income = parseFloat(document.getElementById('calc-income').value) || 0;
-            const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
-            const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
-            const price = parseFloat(document.getElementById('calc-price').value) || 0;
-            
-            const totalRate = (baseRate + stressRate) / 100;
-            const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
-            const ltvLimit = price * ltvRatio;
-            
-            const dsrLimit = income * 0.4;
-            const n = 30 * 12; // 30년 상환
-            const r = totalRate / 12;
-            const factor = r === 0 ? (1/n) : (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-            const dsrMaxLoan = dsrLimit / (factor * 12);
-            
-            const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
-            const needCash = price - finalLoan;
-            
-            document.getElementById('calc-result').innerText = Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
-            document.getElementById('calc-cash').innerText = "필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
-        }
+		function calculateDsr() {
+			const income = parseFloat(document.getElementById('calc-income').value) || 0;
+			const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
+			const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
+			const price = parseFloat(document.getElementById('calc-price').value) || 0;
+			
+			if (price === 0) return;
+
+			// 1. 합산 금리 및 기간 (30년 상환)
+			const totalRate = (baseRate + stressRate) / 100;
+			const n = 30 * 12; 
+			const r = totalRate / 12;
+
+			// 2. LTV 한도 (규제 40% / 비규제 70%)
+			const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
+			const ltvLimit = price * ltvRatio;
+			
+			// 3. DSR 기반 한도 (DSR 40%)
+			const dsrLimit = income * 0.4;
+			const factor = r === 0 ? (1/n) : (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+			const dsrMaxLoan = dsrLimit / (factor * 12);
+
+			// 4. 정부 정책 한도 (Absolute Cap) 적용
+			let policyLimit = 60000; // 15억 이하: 최대 6억
+			if (price > 250000) {
+				policyLimit = 20000; // 25억 초과: 최대 2억
+			} else if (price > 150000) {
+				policyLimit = 40000; // 15억 초과 ~ 25억 이하: 최대 4억
+			}
+			
+			// 5. 최종 한도 결정: LTV, DSR, 정책 상한액 중 최소값
+			const finalLoan = Math.min(ltvLimit, dsrMaxLoan, policyLimit);
+			const needCash = price - finalLoan;
+			
+			// 화면 결과 표시
+			document.getElementById('calc-result').innerText = 
+				Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
+			document.getElementById('calc-cash').innerText = 
+				"필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
+		}
 
         document.getElementById('calc-income').addEventListener('input', calculateDsr);
         document.getElementById('calc-base-rate').addEventListener('input', calculateDsr);
