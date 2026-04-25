@@ -31,20 +31,3 @@ def fetch_land_data(lawd_cd, deal_ymd):
         
         result_code = root.find('.//resultCode')
         if result_code is not None and result_code.text != '00':
-            return []
-            
-        items = []
-        for item in root.findall('.//item'):
-            data = {child.tag: child.text.strip() if child.text else '' for child in item}
-            # 지역 구분을 위해 법정동 앞에 시/구를 붙여주면 나중에 보기 좋습니다 (선택사항)
-            data['지역코드'] = lawd_cd 
-            items.append(data)
-        return items
-    except Exception as e:
-        print(f"Error fetching {lawd_cd}: {e}")
-        return []
-
-all_data = []
-print("데이터 수집을 시작합니다. (약 3~5분 소요 예상)")
-for name, code in DISTRICT_CODES.items():
-    for month in
