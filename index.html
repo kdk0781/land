@@ -3,52 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>부동산 실거래 & 랭킹 대시보드</title>
+    <title>부동산 실거래 랭킹 & DSR 대시보드</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
-        body { font-family: 'Pretendard', sans-serif; }
-        /* 스크롤바 숨기기 (모바일 탭 메뉴용) */
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        .tab-btn { white-space: nowrap; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 800; transition: all 0.2s; border: 1px solid #e2e8f0; color: #64748b; background: white;}
-        .tab-btn.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2); }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div id="loader" class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white">
         <div class="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="text-slate-600 font-bold">대규모 실거래 데이터 처리 중...</p>
+        <p class="text-slate-600 font-bold">전국 실거래 데이터 분석 중...</p>
     </div>
 
     <div class="max-w-2xl mx-auto min-h-screen pb-20 bg-white shadow-sm">
         <header class="p-5 bg-white border-b sticky top-0 z-40">
             <div class="flex justify-between items-center mb-4">
                 <div>
-                    <h1 class="text-2xl font-black text-slate-800">Market Insight</h1>
-                    <p class="text-xs text-slate-400 mt-1">지역별 아파트 랭킹 & DSR 시뮬레이션</p>
+                    <h1 class="text-2xl font-black text-slate-800 tracking-tighter">Market Insight</h1>
+                    <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Real Estate Analysis Dashboard</p>
                 </div>
                 <div class="text-right">
-                    <span id="total-count" class="text-blue-600 font-black text-xl">0</span><span class="text-slate-500 text-xs font-bold">건</span>
+                    <span id="total-count" class="text-blue-600 font-black text-xl">0</span><span class="text-slate-500 text-xs font-bold ml-1">건</span>
                 </div>
             </div>
 
             <div class="flex overflow-x-auto gap-2 pb-2 hide-scrollbar" id="category-tabs">
                 <button class="tab-btn active" data-mode="latest">⚡ 최신 거래</button>
-                <button class="tab-btn" data-mode="volume">🔥 거래량 랭킹</button>
-                <button class="tab-btn" data-mode="top_price">👑 최고가 랭킹</button>
-                <button class="tab-btn" data-mode="top_pyung">💎 최고 평당가</button>
-                <button class="tab-btn border-emerald-500 text-emerald-600" data-mode="gap_invest">🎯 갭투자/전세가율 순위</button>
+                <button class="tab-btn" data-mode="volume">🔥 거래량 순위</button>
+                <button class="tab-btn" data-mode="top_price">👑 최고가 순위</button>
+                <button class="tab-btn" data-mode="gap_invest">🎯 갭투자/전세가율</button>
             </div>
         </header>
 
-        <div class="p-4 bg-slate-50 border-b flex gap-2">
-            <select id="region-select" class="w-1/3 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm font-bold outline-none focus:border-blue-500 shadow-sm text-slate-700">
-                <option value="all">전체 지역 (동)</option>
+        <div class="p-4 bg-slate-50 border-b space-y-2">
+            <div class="flex gap-2">
+                <select id="sido-select" class="w-1/2 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm font-bold outline-none focus:border-blue-500 shadow-sm">
+                    <option value="all">전체 시/도</option>
                 </select>
-            <input type="text" id="search-input" placeholder="아파트명 검색 (예: 자이)" class="w-2/3 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 shadow-sm">
+                <select id="region-select" class="w-1/2 px-3 py-3 rounded-xl border border-slate-200 bg-white text-sm font-bold outline-none focus:border-blue-500 shadow-sm" disabled>
+                    <option value="all">구/동 선택</option>
+                </select>
+            </div>
+            <input type="text" id="search-input" placeholder="아파트명 직접 검색" class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-blue-500 shadow-sm">
         </div>
 
         <main class="p-4 space-y-4 bg-slate-50" id="trade-list">
@@ -56,7 +51,7 @@
     </div>
 
     <div id="dsr-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col scale-in">
             <div class="p-6 border-b flex justify-between items-center bg-slate-50">
                 <div>
                     <h2 class="text-lg font-extrabold text-slate-800">대출 한도 시뮬레이션</h2>
@@ -66,245 +61,33 @@
             </div>
             <div class="p-6 overflow-y-auto space-y-4 text-sm">
                 <div>
-                    <label class="block text-xs font-bold text-slate-500 mb-1">매매 가격 (만원)</label>
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1">매매 가격 (만원)</label>
                     <input type="number" id="calc-price" class="w-full p-3 bg-slate-100 rounded-xl font-bold text-lg outline-none text-slate-700" readonly>
                 </div>
                 <div>
-                    <label class="block text-xs font-bold text-slate-500 mb-1">연간 소득 (만원)</label>
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1">연간 소득 (만원)</label>
                     <input type="number" id="calc-income" value="6000" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
                 <div>
-                    <label class="block text-xs font-bold text-slate-500 mb-1">스트레스 DSR 단계 (가산금리)</label>
-                    <select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none">
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 DSR 단계 (가산금리)</label>
+                    <select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none text-sm">
                         <option value="0.75">2단계 (현재 0.75%)</option>
                         <option value="1.15">3단계 (1.15%)</option>
                         <option value="1.5">3단계 (1.5%)</option>
                         <option value="2.87">3단계 (2.87%)</option>
                     </select>
                 </div>
-                <div class="bg-blue-600 p-5 rounded-2xl text-white mt-2">
-                    <div class="text-xs opacity-80 mb-1 font-bold">최대 대출 가능 금액 (DSR 40%)</div>
-                    <div id="calc-result" class="text-2xl font-black">계산 중...</div>
-                    <div class="mt-3 pt-3 border-t border-white/20 flex justify-between items-center">
-                        <span class="text-xs font-bold italic text-blue-100">* LTV 70% / 40년 상환 기준</span>
-                    </div>
+                <div class="bg-blue-600 p-6 rounded-2xl text-white mt-2 shadow-lg">
+                    <div class="text-[10px] opacity-70 mb-1 font-bold uppercase tracking-widest">Estimated Loan Limit</div>
+                    <div id="calc-result" class="text-2xl font-black tracking-tight">0원</div>
+                    <p class="text-[9px] mt-4 opacity-50 font-medium leading-relaxed italic">
+                        * 40년 상환, DSR 40% 기준이며 실제 한도는 LTV 및 개인 신용도에 따라 상이합니다.
+                    </p>
                 </div>
             </div>
         </div>
     </div>
 
-    <script>
-        let allData = [];
-        let currentMode = 'latest'; // 기본 모드
-
-        // 1. 데이터 로드 및 파싱
-        Papa.parse("apt_trade_data.csv", {
-            download: true,
-            header: true,
-            complete: function(results) {
-                allData = results.data.filter(row => row.아파트 && row.거래금액).map(row => {
-                    const price = parseInt(row.거래금액);
-                    const area = parseFloat(row.전용면적);
-                    const pyung = area / 3.3058;
-                    const pyungPrice = Math.round(price / pyung);
-                    return { ...row, price, pyungPrice, pyung: pyung.toFixed(1) };
-                });
-                
-                // 1. 데이터 가공 시 행정구역 분리
-                allData = results.data.map(row => {
-                    const addr = row.시군구.split(' '); // "서울특별시 강남구 논현동" 분리
-                    return {
-                        ...row,
-                        sido: addr[0],
-                        sigungu: addr[1],
-                        dong: addr[2],
-                        fullGudong: `${addr[1]} - ${addr[2]}` // "강남구 - 논현동" 형태
-                    };
-                });
-                
-                // 2. 첫 번째 셀렉트(시/도) 채우기
-                const sidos = [...new Set(allData.map(i => i.sido))].sort();
-                // sido-select에 option 추가...
-                
-                // 3. 시/도 변경 시 구/동 리스트 업데이트 이벤트
-                document.getElementById('sido-select').addEventListener('change', (e) => {
-                    const selectedSido = e.target.value;
-                    const filteredGudongs = [...new Set(allData.filter(i => i.sido === selectedSido).map(i => i.fullGudong))].sort();
-                    
-                    // gudong-select의 내용을 비우고 filteredGudongs로 다시 채우기
-                    renderGudongOptions(filteredGudongs);
-                });
-                
-                document.getElementById('total-count').innerText = allData.length.toLocaleString();
-                document.getElementById('loader').style.display = 'none';
-
-                // 2. 지역(법정동) 목록 동적 생성 (전국 확장 대비)
-                const regions = [...new Set(allData.map(item => item.법정동))].filter(Boolean).sort();
-                const regionSelect = document.getElementById('region-select');
-                regions.forEach(r => {
-                    let opt = document.createElement('option');
-                    opt.value = r;
-                    opt.innerText = r + " (동)";
-                    regionSelect.appendChild(opt);
-                });
-
-                renderList();
-            }
-        });
-
-        // 3. 탭 클릭 이벤트 (카테고리 변경)
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                if(this.disabled) return; // 준비중 탭 클릭 방지
-                
-                // 버튼 스타일 변경
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                
-                currentMode = this.dataset.mode;
-                renderList();
-            });
-        });
-
-        // 4. 리스트 렌더링 (모드별 로직 분리)
-        function renderList() {
-            const searchTerm = document.getElementById('search-input').value.toLowerCase();
-            const selectedRegion = document.getElementById('region-select').value;
-            const listDiv = document.getElementById('trade-list');
-
-            // 기본 필터링 (지역 & 검색어)
-            let filtered = allData.filter(item => {
-                const matchRegion = selectedRegion === 'all' || item.법정동 === selectedRegion;
-                const matchSearch = item.아파트.toLowerCase().includes(searchTerm);
-                return matchRegion && matchSearch;
-    if (currentMode === 'gap_invest') {
-    // 전세가율이 높은 순(또는 갭이 적은 순)으로 정렬
-    // 전세 데이터가 매칭된(전세가율 > 0) 매물만 필터링
-    let gapData = filtered.filter(item => item.전세가율 > 0)
-                          .sort((a, b) => b.전세가율 - a.전세가율);
-
-    listDiv.innerHTML = gapData.slice(0, 50).map((item, index) => `
-        <div class="bg-white p-5 rounded-3xl shadow-sm border border-emerald-100 relative overflow-hidden">
-            <div class="absolute top-0 right-0 bg-emerald-500 text-white px-3 py-1 rounded-bl-xl text-xs font-bold">
-                전세가율 ${Number(item.전세가율).toFixed(1)}%
-            </div>
-            
-            <div class="flex justify-between items-center mb-2 mt-2">
-                <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.법정동}</span>
-            </div>
-            <h3 class="text-lg font-extrabold text-slate-800 tracking-tighter">${index + 1}위. ${item.아파트}</h3>
-            
-            <div class="mt-4 p-3 bg-slate-50 rounded-xl flex justify-between items-center">
-                <div>
-                    <div class="text-[10px] text-slate-400 font-bold mb-1">매매가</div>
-                    <div class="font-bold text-slate-700">${(item.price/10000).toFixed(1)}억</div>
-                </div>
-                <div class="text-slate-300">-</div>
-                <div>
-                    <div class="text-[10px] text-slate-400 font-bold mb-1">전세가 (평균)</div>
-                    <div class="font-bold text-slate-700">${(item.전세가/10000).toFixed(1)}억</div>
-                </div>
-                <div class="text-slate-300">=</div>
-                <div class="text-right">
-                    <div class="text-[10px] text-emerald-600 font-bold mb-1">실투자금(갭)</div>
-                    <div class="font-black text-emerald-600 text-lg">${(item.갭_금액/10000).toFixed(1)}억</div>
-                </div>
-            </div>
-        </div>
-    `).join('');
-    return;
-}
-            });
-
-            listDiv.innerHTML = '';
-
-            // --- 거래량 폭발 (아실 스타일 랭킹) ---
-            if (currentMode === 'volume') {
-                let grouped = {};
-                filtered.forEach(item => {
-                    const key = `${item.법정동}_${item.아파트}`;
-                    if(!grouped[key]) {
-                        grouped[key] = { ...item, count: 0, maxPrice: 0 };
-                    }
-                    grouped[key].count++;
-                    if(item.price > grouped[key].maxPrice) grouped[key].maxPrice = item.price;
-                });
-
-                let volumeData = Object.values(grouped).sort((a, b) => b.count - a.count).slice(0, 50);
-
-                listDiv.innerHTML = volumeData.map((item, index) => `
-                    <div class="bg-white p-5 rounded-3xl shadow-sm border ${index < 3 ? 'border-blue-200 bg-blue-50/30' : 'border-slate-100'}">
-                        <div class="flex justify-between items-center mb-2">
-                            <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.법정동}</span>
-                            <span class="text-xs font-black ${index < 3 ? 'text-red-500' : 'text-blue-600'}">🏆 거래량 ${item.count}건</span>
-                        </div>
-                        <h3 class="text-lg font-extrabold text-slate-800 tracking-tighter">${index + 1}위. ${item.아파트}</h3>
-                        <div class="mt-2 text-sm font-bold text-slate-500">최고가 ${(item.maxPrice/10000).toFixed(1)}억</div>
-                    </div>
-                `).join('');
-                return; // 거래량 렌더링 끝
-            }
-
-            // --- 일반 거래 리스트 (최신, 최고가, 최고평당가) ---
-            if (currentMode === 'top_price') filtered.sort((a, b) => b.price - a.price);
-            else if (currentMode === 'top_pyung') filtered.sort((a, b) => b.pyungPrice - a.pyungPrice);
-            else filtered.sort((a, b) => b.년+b.월+b.일 - (a.년+a.월+a.일)); // latest
-
-            listDiv.innerHTML = filtered.slice(0, 100).map(item => `
-                <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 hover:shadow-md transition-all">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-extrabold rounded-lg">${item.법정동}</span>
-                        <span class="text-[10px] font-bold text-slate-400 italic">${item.년}.${item.월}.${item.일}</span>
-                    </div>
-                    <h3 class="text-lg font-extrabold text-slate-800 tracking-tighter">${item.아파트}</h3>
-                    <div class="mt-3 flex justify-between items-end">
-                        <div class="text-sm text-slate-500 font-medium">
-                            ${item.전용면적}㎡ (${item.pyung}평) | ${item.층}층
-                        </div>
-                        <div class="text-right">
-                            <div class="text-xl font-black text-blue-700">${(item.price/10000).toFixed(1)}억</div>
-                            <div class="text-[10px] font-bold text-slate-400 mt-0.5 underline decoration-blue-200">평당 ${item.pyungPrice.toLocaleString()}만</div>
-                        </div>
-                    </div>
-                    <button onclick="openDsrModal('${item.아파트}', ${item.price})" class="w-full mt-4 py-3 bg-slate-50 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-100 border border-slate-200 transition-colors">💰 대출 한도 계산기</button>
-                </div>
-            `).join('');
-        }
-
-        // 5. 모달 및 계산기 로직
-        function openDsrModal(name, price) {
-            document.getElementById('modal-apt-name').innerText = name;
-            document.getElementById('calc-price').value = price;
-            document.getElementById('dsr-modal').classList.remove('hidden');
-            document.getElementById('dsr-modal').classList.add('flex');
-            calculateDsr();
-        }
-
-        function closeDsrModal() {
-            document.getElementById('dsr-modal').classList.add('hidden');
-            document.getElementById('dsr-modal').classList.remove('flex');
-        }
-
-        function calculateDsr() {
-            const income = document.getElementById('calc-income').value;
-            const stressRate = parseFloat(document.getElementById('calc-stress').value);
-            const baseRate = 4.0; 
-            const totalRate = (baseRate + stressRate) / 100;
-            const dsrLimit = income * 0.4; 
-            
-            const n = 40 * 12;
-            const r = totalRate / 12;
-            const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-            
-            const maxLoan = dsrLimit / (factor * 12);
-            document.getElementById('calc-result').innerText = Math.floor(maxLoan / 10000) + "억 " + (Math.floor(maxLoan % 10000)).toLocaleString() + "만원";
-        }
-
-        // 이벤트 리스너 등록
-        document.getElementById('region-select').addEventListener('change', renderList);
-        document.getElementById('search-input').addEventListener('input', renderList);
-        document.getElementById('calc-income').addEventListener('input', calculateDsr);
-        document.getElementById('calc-stress').addEventListener('change', calculateDsr);
-    </script>
+    <script src="script.js" defer></script>
 </body>
 </html>
