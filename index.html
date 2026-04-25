@@ -82,7 +82,7 @@
 						<input type="number" id="calc-base-rate" value="4.0" step="0.1" class="w-full p-3 border rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
 					</div>
 					<div>
-						<label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 금리 적용</label>
+						<label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 금리 (가산)</label>
 						<select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none text-sm">
 							<option value="1.15">주기형 (1.15%)</option>
 							<option value="1.50">혼합형 (1.50%)</option>
@@ -344,35 +344,45 @@
         }
 
 		function calculateDsr() {
+			// 1. 값 가져오기 (ID 일치 확인)
 			const income = parseFloat(document.getElementById('calc-income').value) || 0;
 			const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
-			const stressRate = parseFloat(document.getElementById('calc-stress').value);
+			const stressRate = parseFloat(document.getElementById('calc-stress').value) || 0;
 			const price = parseFloat(document.getElementById('calc-price').value) || 0;
 			
-			// 1. 합산 금리 계산 (기본 금리 + 스트레스 가산금리)
+			if (price === 0) return;
+
+			// 2. 합산 금리 및 상환 기간 설정
 			const totalRate = (baseRate + stressRate) / 100;
-			
-			// 2. LTV 한도 적용 (규제지역 40% vs 비규제지역 70%)
+			const n = 30 * 12; // 💡 40년에서 30년으로 변경됨
+			const r = totalRate / 12;
+
+			// 3. LTV 한도 계산 (기존 로직 유지)
 			const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
 			const ltvLimit = price * ltvRatio;
 			
-			// 3. DSR 기반 최대 대출액 계산 (DSR 40%, 40년 만기 가정)
+			// 4. DSR 기반 최대 대출액 계산 (DSR 40%)
 			const dsrLimit = income * 0.4;
-			const n = 30 * 12; // 30년 상환
-			const r = totalRate / 12;
+			// 원리금균등상환 공식
 			const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 			const dsrMaxLoan = dsrLimit / (factor * 12);
 			
-			// 4. 최종 한도 결정 (LTV와 DSR 중 적은 금액)
+			// 5. 최종 한도 및 필요 자본금 결정
 			const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
 			const needCash = price - finalLoan;
 			
-			// 결과 화면 표시
+			// 6. 화면 결과 업데이트
 			document.getElementById('calc-result').innerText = 
 				Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
 			document.getElementById('calc-cash').innerText = 
 				"필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
 		}
+
+		// 입력값이 바뀔 때마다 실시간 계산되도록 이벤트 리스너 연결 확인
+		document.getElementById('calc-income').addEventListener('input', calculateDsr);
+		document.getElementById('calc-base-rate').addEventListener('input', calculateDsr);
+		document.getElementById('calc-stress').addEventListener('change', calculateDsr);
+		document.getElementById('calc-price').addEventListener('input', calculateDsr);
     </script>
 </body>
 </html>
