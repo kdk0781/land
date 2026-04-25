@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>부동산 이상 행동 감지 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <div class="max-w-md mx-auto min-h-screen pb-20">
+        <header class="p-6 bg-white border-b sticky top-0 z-10">
+            <h1 class="text-xl font-bold text-blue-600">Market Anomaly Detection</h1>
+            <p class="text-sm text-gray-500">성동·광진·중랑 실거래 모니터링</p>
+        </header>
+
+        <main class="p-4 space-y-4">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                <h2 class="text-sm font-semibold text-gray-400 mb-1">최근 업데이트 거래</h2>
+                <div id="summary-value" class="text-3xl font-bold">집계 중...</div>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                <h3 class="font-bold mb-4">지역별 거래 비중</h3>
+                <canvas id="districtChart"></canvas>
+            </div>
+
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                <h3 class="font-bold mb-4">최신 거래 목록</h3>
+                <div id="trade-list" class="space-y-3 text-sm">
+                    </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // CSV 데이터 읽기
+        Papa.parse("apt_trade_data.csv", {
+            download: true,
+            header: true,
+            complete: function(results) {
+                const data = results.data.filter(row => row.아파트); // 빈 줄 제거
+                updateUI(data);
+            }
+        });
+
+        function updateUI(data) {
+            // 요약 수치
+            document.getElementById('summary-value').innerText = data.length + "건";
+
+            // 리스트 업데이트
+            const listDiv = document.getElementById('trade-list');
+            listDiv.innerHTML = data.slice(0, 10).map(item => `
+                <div class="flex justify-between items-center border-b pb-2">
+                    <div>
+                        <div class="font-medium">${item.아파트}</div>
+                        <div class="text-xs text-gray-400">${item.년}.${item.월}.${item.일} | ${item.전용면적}㎡</div>
+                    </div>
+                    <div class="text-blue-600 font-bold">${item.거래금액.trim()}만</div>
+                </div>
+            `).join('');
+
+            // 차트 데이터 가공 (구별 통계)
+            const districts = { '11200': 0, '11215': 0, '11260': 0 };
+            data.forEach(item => { if(districts[item.지역코드] !== undefined) districts[item.지역코드]++; });
+
+            new Chart(document.getElementById('districtChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['성동구', '광진구', '중랑구'],
+                    datasets: [{
+                        data: [districts['11200'], districts['11215'], districts['11260']],
+                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b']
+                    }]
+                },
+                options: { plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+    </script>
+</body>
+</html>
