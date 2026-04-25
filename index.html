@@ -67,33 +67,30 @@
                 </div>
                 <button onclick="closeDsrModal()" class="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400">✕</button>
             </div>
-            <div class="p-6 overflow-y-auto space-y-4 text-sm">
-                <div>
-                    <div class="flex justify-between items-end mb-1">
-                        <label class="block text-[10px] font-bold text-slate-400">매매 가격 (만원)</label>
-                        <span id="modal-reg-badge" class="text-[10px] font-black text-red-500 bg-red-50 px-2 py-0.5 rounded"></span>
-                    </div>
-                    <input type="number" id="calc-price" class="w-full p-3 bg-slate-100 rounded-xl font-bold text-lg outline-none text-slate-700" readonly>
-                </div>
-                <div>
-                    <label class="block text-[10px] font-bold text-slate-400 mb-1">연간 소득 (만원)</label>
-                    <input type="number" id="calc-income" value="6000" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 DSR 단계 (가산금리)</label>
-                    <select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none text-sm">
-                        <option value="0.75">2단계 (현재 0.75%)</option>
-                        <option value="1.15">3단계 (1.15%)</option>
-                        <option value="1.5">3단계 (1.5%)</option>
-                        <option value="2.87">3단계 (2.87%)</option>
-                    </select>
-                </div>
-                <div class="bg-blue-600 p-6 rounded-2xl text-white mt-2 shadow-lg">
-                    <div class="text-[10px] opacity-70 mb-1 font-bold uppercase tracking-widest">최종 대출 가능액 (LTV / DSR 최저값 적용)</div>
-                    <div id="calc-result" class="text-2xl font-black tracking-tight">0원</div>
-                    <div id="calc-cash" class="text-sm font-bold text-blue-200 mt-2">필요 자본금: 0원</div>
-                </div>
-            </div>
+			<div class="space-y-4 mb-6">
+				<div>
+					<label class="block text-[10px] font-bold text-slate-400 mb-1">매매 가격 (만원)</label>
+					<input type="number" id="calc-price" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
+				</div>
+				<div>
+					<label class="block text-[10px] font-bold text-slate-400 mb-1">연간 소득 (만원)</label>
+					<input type="number" id="calc-income" value="6000" class="w-full p-3 border rounded-xl font-bold text-lg outline-none focus:ring-2 focus:ring-blue-500">
+				</div>
+				<div class="grid grid-cols-2 gap-3">
+					<div>
+						<label class="block text-[10px] font-bold text-slate-400 mb-1">기본 대출 금리 (%)</label>
+						<input type="number" id="calc-base-rate" value="4.0" step="0.1" class="w-full p-3 border rounded-xl font-bold outline-none focus:ring-2 focus:ring-blue-500">
+					</div>
+					<div>
+						<label class="block text-[10px] font-bold text-slate-400 mb-1">스트레스 금리 적용</label>
+						<select id="calc-stress" class="w-full p-3 border rounded-xl font-bold bg-white outline-none text-sm">
+							<option value="1.15">주기형 (1.15%)</option>
+							<option value="1.50">혼합형 (1.50%)</option>
+							<option value="2.87">변동형 (2.87%)</option>
+						</select>
+					</div>
+				</div>
+			</div>
         </div>
     </div>
 
@@ -346,29 +343,36 @@
             document.getElementById('dsr-modal').classList.remove('flex');
         }
 
-        function calculateDsr() {
-            const income = document.getElementById('calc-income').value || 0;
-            const stressRate = parseFloat(document.getElementById('calc-stress').value);
-            
-            // 💡 수정됨: 규제 지역 실제 계산 로직 (0.5 -> 0.4 로 변경)
-            const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
-            const ltvLimit = currentCalcPrice * ltvRatio;
-            
-            const totalRate = (4.0 + stressRate) / 100;
-            const dsrLimit = income * 0.4;
-            const n = 40 * 12;
-            const r = totalRate / 12;
-            const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
-            const dsrMaxLoan = dsrLimit / (factor * 12);
-            
-            const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
-            const needCash = currentCalcPrice - finalLoan;
-            
-            document.getElementById('calc-result').innerText = 
-                Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
-            document.getElementById('calc-cash').innerText = 
-                "필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
-        }
+		function calculateDsr() {
+			const income = parseFloat(document.getElementById('calc-income').value) || 0;
+			const baseRate = parseFloat(document.getElementById('calc-base-rate').value) || 0;
+			const stressRate = parseFloat(document.getElementById('calc-stress').value);
+			const price = parseFloat(document.getElementById('calc-price').value) || 0;
+			
+			// 1. 합산 금리 계산 (기본 금리 + 스트레스 가산금리)
+			const totalRate = (baseRate + stressRate) / 100;
+			
+			// 2. LTV 한도 적용 (규제지역 40% vs 비규제지역 70%)
+			const ltvRatio = currentRegStatus.includes("투기") ? 0.4 : 0.7;
+			const ltvLimit = price * ltvRatio;
+			
+			// 3. DSR 기반 최대 대출액 계산 (DSR 40%, 40년 만기 가정)
+			const dsrLimit = income * 0.4;
+			const n = 40 * 12; // 40년 상환
+			const r = totalRate / 12;
+			const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+			const dsrMaxLoan = dsrLimit / (factor * 12);
+			
+			// 4. 최종 한도 결정 (LTV와 DSR 중 적은 금액)
+			const finalLoan = Math.min(ltvLimit, dsrMaxLoan);
+			const needCash = price - finalLoan;
+			
+			// 결과 화면 표시
+			document.getElementById('calc-result').innerText = 
+				Math.floor(finalLoan / 10000) + "억 " + (Math.floor(finalLoan % 10000)).toLocaleString() + "만원";
+			document.getElementById('calc-cash').innerText = 
+				"필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
+		}
 
         document.getElementById('calc-income').addEventListener('input', calculateDsr);
         document.getElementById('calc-stress').addEventListener('change', calculateDsr);
