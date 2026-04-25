@@ -3,6 +3,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import time
+import sys
 
 # 일반 인증키(Decoding)
 API_KEY = '4dc9ae5186b8259cfa06a26e9aa19e5c2758fb51804d6a48165b7f8ae499d50a'
@@ -20,10 +21,16 @@ months_to_fetch = [
     (today.replace(day=1) - timedelta(days=1)).strftime('%Y%m')
 ]
 
+# 연속 실패 횟수를 체크하기 위한 변수
+consecutive_errors = 0
+
 def fetch_land_data(lawd_cd, deal_ymd):
-    url = f"http://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/getRTMSDataSvcAptTradeDev?serviceKey={API_KEY}&LAWD_CD={lawd_cd}&DEAL_YMD={deal_ymd}"
+    global consecutive_errors
+    # http -> https 로 변경
+    url = f"https://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/getRTMSDataSvcAptTradeDev?serviceKey={API_KEY}&LAWD_CD={lawd_cd}&DEAL_YMD={deal_ymd}"
     try:
-        response = requests.get(url, timeout=15)
+        # verify=False 를 추가해 공공기관 인증서 오류 무시
+        response = requests.get(url, timeout=10, verify=False)
         root = ET.fromstring(response.content)
         
         result_code = root.find('.//resultCode')
@@ -35,14 +42,25 @@ def fetch_land_data(lawd_cd, deal_ymd):
             data = {child.tag: child.text.strip() if child.text else '' for child in item}
             data['지역코드'] = lawd_cd 
             items.append(data)
+            
+        consecutive_errors = 0 # 성공하면 에러 카운트 초기화
         return items
+        
+    except requests.exceptions.RequestException as e:
+        print(f"네트워크/서버 오류 발생 ({lawd_cd}): {e}")
+        consecutive_errors += 1
+        return []
     except Exception as e:
-        print(f"Error fetching {lawd_cd}: {e}")
+        print(f"데이터 파싱 오류 ({lawd_cd}): {e}")
         return []
 
 all_data = []
 print("데이터 수집을 시작합니다. (약 3~5분 소요 예상)")
 for name, code in DISTRICT_CODES.items():
+    if consecutive_errors >= 5:
+        print("🚨 공공데이터 서버 응답이 5회 연속 실패했습니다. 서버 점검 중일 확률이 높으므로 스크립트를 강제 종료합니다.")
+        break # 서버가 죽었을 때 불필요한 반복 방지
+        
     for month in months_to_fetch:
         all_data.extend(fetch_land_data(code, month))
         time.sleep(0.5)
