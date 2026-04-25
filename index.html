@@ -358,7 +358,7 @@
 			
 			// 3. DSR 기반 최대 대출액 계산 (DSR 40%, 40년 만기 가정)
 			const dsrLimit = income * 0.4;
-			const n = 40 * 12; // 40년 상환
+			const n = 30 * 12; // 30년 상환
 			const r = totalRate / 12;
 			const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 			const dsrMaxLoan = dsrLimit / (factor * 12);
@@ -373,9 +373,6 @@
 			document.getElementById('calc-cash').innerText = 
 				"필요 자본금: " + Math.floor(needCash / 10000) + "억 " + (Math.floor(needCash % 10000)).toLocaleString() + "만원";
 		}
-
-        document.getElementById('calc-income').addEventListener('input', calculateDsr);
-        document.getElementById('calc-stress').addEventListener('change', calculateDsr);
     </script>
 </body>
 </html>
