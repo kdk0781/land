@@ -1,27 +1,56 @@
 @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
 
+/* --- 테마 변수 (Light/Dark 지원) --- */
+:root {
+    --bg-color: #f8fafc;
+    --card-bg: #ffffff;
+    --text-main: #1e293b;
+    --text-sub: #64748b;
+    --border-color: #e2e8f0;
+    --filter-bg: #f1f5f9;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-color: #0f172a;
+        --card-bg: #1e293b;
+        --text-main: #f8fafc;
+        --text-sub: #94a3b8;
+        --border-color: #334155;
+        --filter-bg: #0f172a;
+    }
+}
+
+/* --- 공통 스타일 --- */
 body { 
-    font-family: 'Pretendard', sans-serif; 
+    background-color: var(--bg-color);
+    color: var(--text-main);
     word-break: keep-all;
 }
 
-/* 스크롤바 숨기기 */
+.theme-bg { background-color: var(--bg-color); }
+.theme-card-bg { background-color: var(--card-bg); }
+.theme-text { color: var(--text-main); }
+.theme-text-sub { color: var(--text-sub); }
+.theme-header-bg { background-color: var(--card-bg); border-bottom: 1px solid var(--border-color); }
+.theme-filter-bg { background-color: var(--bg-color); }
+.loader-bg { background-color: var(--card-bg); }
+
 .hide-scrollbar::-webkit-scrollbar { display: none; }
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* 탭 버튼 스타일 */
+/* --- 컴포넌트 --- */
 .tab-btn { 
     white-space: nowrap; 
     padding: 0.6rem 1.2rem; 
     border-radius: 9999px; 
     font-size: 0.8rem; 
     font-weight: 800; 
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
-    border: 1px solid #f1f5f9; 
-    color: #94a3b8; 
-    background: #f8fafc;
+    transition: all 0.3s; 
+    border: 1px solid var(--border-color);
+    color: var(--text-sub); 
+    background: var(--card-bg);
 }
-
 .tab-btn.active { 
     background: #2563eb; 
     color: white; 
@@ -29,17 +58,58 @@ body {
     box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
 }
 
-/* 모달 애니메이션 */
-.scale-in {
-    animation: scaleIn 0.3s ease-out;
+.filter-select, .filter-input, .modal-input, .modal-select {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+    color: var(--text-main);
+    font-size: 0.875rem;
+    font-weight: 700;
+    outline: none;
+}
+.filter-input:focus { border-color: #2563eb; }
+
+.modal-input-readonly {
+    background-color: var(--filter-bg);
+    color: var(--text-sub);
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    font-weight: 800;
+    font-size: 1.125rem;
 }
 
-@keyframes scaleIn {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
-}
+.input-label { display: block; font-size: 10px; font-weight: 800; color: var(--text-sub); margin-bottom: 0.25rem; }
 
-/* 랭킹 카드 강조 */
-.rank-top {
-    border-left: 4px solid #2563eb;
+.reg-badge { font-size: 10px; font-weight: 900; color: #ef4444; background-color: #fef2f2; padding: 2px 6px; border-radius: 4px; }
+
+.scale-in { animation: scaleIn 0.3s ease-out; }
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+
+/* --- 지적하신 유의사항 가독성 개선 섹션 --- */
+.notice-section {
+    padding: 1rem;
+    background-color: var(--filter-bg);
+    border-left: 4px solid #3b82f6; /* 파란색 강조선 */
+    border-radius: 0.75rem;
 }
+.notice-title { font-size: 11px; font-weight: 900; color: var(--text-main); text-transform: uppercase; letter-spacing: 0.05em; }
+.notice-list { list-style: none; padding: 0; margin: 0; }
+.notice-list li {
+    font-size: 11px;
+    color: var(--text-sub);
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+    position: relative;
+    padding-left: 1rem;
+}
+.notice-list li::before {
+    content: "•";
+    color: #3b82f6;
+    font-weight: bold;
+    position: absolute;
+    left: 0;
+}
+.first-home-box { background-color: #eff6ff; border-color: #dbeafe; }
