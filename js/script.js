@@ -84,22 +84,35 @@ function hideLoader() {
 
 // ═══ 데이터 병렬 로드 ════════════════════════════════
 function loadAllData() {
-    // 30초 안전장치
+    // 45초 절대 안전장치
     const guard = setTimeout(() => {
         hideLoader();
-        showEmpty('⏱ 로딩 시간 초과. CSV 파일이 같은 폴더에 있는지 확인하세요.');
-    }, 30000);
+        showEmpty('⏱ 로딩 시간 초과.\napt_trade_data.csv가 index.html과 같은 폴더에 있는지 확인하세요.');
+    }, 45000);
 
     setLoader('실거래 데이터 로드 중...');
 
-    const tradePromise = loadCsvChunk('apt_trade_data.csv');
-    const kbPromise    = loadCsvChunk('map.csv');
+    // map.csv는 없어도 진행 (optional), 실패 시 빈 배열
+    const kbSafe = loadCsvSafe('map.csv').then(rows => {
+        if (rows.length) processKbData(rows);
+        const kbCount = Object.keys(kbMap).length;
+        const statusEl = document.getElementById('kb-status');
+        if (statusEl) {
+            statusEl.textContent = kbCount > 0
+                ? `KB 시세 ${kbCount.toLocaleString()}건 ✓`
+                : 'KB 시세 없음';
+            statusEl.className = `kb-status ${kbCount > 0 ? 'loaded' : 'loading'}`;
+        }
+    }).catch(() => {
+        const statusEl = document.getElementById('kb-status');
+        if (statusEl) { statusEl.textContent = 'KB 시세 로드 실패'; statusEl.className = 'kb-status loading'; }
+    });
 
-    Promise.all([tradePromise, kbPromise])
-        .then(([tradeRows, kbRows]) => {
-            clearTimeout(guard);
+    // 실거래 데이터는 필수
+    loadCsvSafe('apt_trade_data.csv')
+        .then(tradeRows => {
+            if (!tradeRows.length) throw new Error('apt_trade_data.csv가 비어 있거나 파일이 없습니다.');
 
-            // ── 실거래 데이터 처리 ──
             setLoader('실거래 데이터 처리 중...');
             allData = tradeRows
                 .filter(r => getField(r, '아파트') && getField(r, '거래금액_n'))
@@ -121,82 +134,86 @@ function loadAllData() {
                         dong,
                         gudong:      `${sigungu} ${dong}`.trim(),
                         regStatus:   getRegStatus(sidoRaw, sigungu, dong),
-                        gap:         parseFloat(getField(r, 'gap')         || 0),
-                        jeonseRatio: parseFloat(getField(r, 'jeonseRatio') || 0),
-                        jeonsePrice: parseFloat(getField(r, 'jeonsePrice') || 0),
-                        아파트:      getField(r, '아파트') || '',
+                        gap:         parseFloat(getField(r, 'gap')          || 0),
+                        jeonseRatio: parseFloat(getField(r, 'jeonseRatio')  || 0),
+                        jeonsePrice: parseFloat(getField(r, 'jeonsePrice')  || 0),
+                        아파트:      getField(r, '아파트')   || '',
                         전용면적:    getField(r, '전용면적') || '',
-                        층:          getField(r, '층') || '',
+                        층:          getField(r, '층')       || '',
                         계약년월:    getField(r, '계약년월') || '',
-                        계약일:      getField(r, '계약일') || '',
+                        계약일:      getField(r, '계약일')   || '',
                     };
                 });
-
-            // ── KB 시세 처리 ──
-            setLoader('KB 시세 데이터 처리 중...');
-            kbRows.forEach(r => {
-                const aptName  = (getField(r, 'apt') || '').trim();
-                const sigungu  = (getField(r, 'sigungu') || '').trim();
-                const dong     = (getField(r, 'dong')    || '').trim();
-                const sido     = (getField(r, 'sido')    || '').trim();
-                const areaStr  = getField(r, 'area') || '0';
-                const area     = parseFloat(areaStr) || 0;
-
-                if (!aptName || !area) return;
-
-                const toNum = s => parseFloat(String(s).replace(/,/g, '')) || 0;
-                const entry = {
-                    하한가:    toNum(getField(r, '하한가')    || '0'),
-                    일반거래가: toNum(getField(r, '일반거래가') || '0'),
-                    상한가:    toNum(getField(r, '상한가')    || '0'),
-                    area, sigungu, dong, sido,
-                };
-
-                // 키1: 지역+아파트+면적 (정확 매칭용)
-                const key1 = `${sido}||${sigungu}||${aptName}||${Math.round(area)}`;
-                if (!kbMap[key1]) kbMap[key1] = [];
-                kbMap[key1].push(entry);
-
-                // 키2: 아파트+면적만 (폴백용, 지역 불명확할 때)
-                const key2 = `_fallback||${aptName}||${Math.round(area)}`;
-                if (!kbMap[key2]) kbMap[key2] = [];
-                kbMap[key2].push(entry);
-            });
-
-            const kbCount = Object.keys(kbMap).length;
-            document.getElementById('kb-status').textContent = `KB 시세 ${kbCount.toLocaleString()}건 ✓`;
-            document.getElementById('kb-status').className = 'kb-status loaded';
 
             initSidoSelect();
             updateStats();
             document.getElementById('total-count').textContent = allData.length.toLocaleString();
+
+            clearTimeout(guard);
             hideLoader();
             renderList();
+
+            // KB는 백그라운드에서 계속 로드되어도 OK
         })
         .catch(err => {
             clearTimeout(guard);
             hideLoader();
-            showEmpty(`❌ 로드 실패: ${err.message}\n\napt_trade_data.csv와 map.csv가 index.html과 같은 폴더에 있어야 합니다.`);
+            showEmpty(`❌ 실거래 데이터 로드 실패\n${err.message}`);
         });
 }
 
-// ── chunk 방식 CSV 로드 (Call Stack 안전) ──
-function loadCsvChunk(path) {
-    return new Promise((resolve, reject) => {
-        const rows = [];
-        let headers = null;
+// ── CSV 안전 로드 (에러 시 빈 배열 반환) ──────────────
+function loadCsvSafe(path) {
+    return new Promise(resolve => {
+        const rows  = [];
+        const timer = setTimeout(() => {
+            resolve(rows.length ? rows : []);
+        }, 10000);
 
         Papa.parse(path, {
-            download: true,
-            header: true,
+            download:       true,
+            header:         true,
             skipEmptyLines: true,
             chunk: (results) => {
-                if (!headers && results.meta.fields) headers = results.meta.fields;
                 rows.push(...results.data);
             },
-            complete: () => resolve(rows),
-            error: (err)  => reject(new Error(err.message || `${path} 로드 실패`)),
+            complete: () => {
+                clearTimeout(timer);
+                resolve(rows);
+            },
+            error: () => {
+                clearTimeout(timer);
+                resolve([]);
+            },
         });
+    });
+}
+
+// ── KB 시세 데이터 처리 ───────────────────────────────
+function processKbData(kbRows) {
+    kbRows.forEach(r => {
+        const aptName = (getField(r, 'apt') || '').trim();
+        const sido    = (getField(r, 'sido')    || '').trim();
+        const sigungu = (getField(r, 'sigungu') || '').trim();
+        const dong    = (getField(r, 'dong')    || '').trim();
+        const area    = parseFloat(getField(r, 'area') || 0);
+        if (!aptName || !area) return;
+
+        const toNum = s => parseFloat(String(s).replace(/,/g, '')) || 0;
+        const entry = {
+            하한가:    toNum(getField(r, '하한가')    || '0'),
+            일반거래가: toNum(getField(r, '일반거래가') || '0'),
+            상한가:    toNum(getField(r, '상한가')    || '0'),
+            area, sido, sigungu, dong,
+        };
+
+        const key1 = `${sido}||${sigungu}||${aptName}||${Math.round(area)}`;
+        if (!kbMap[key1]) kbMap[key1] = [];
+        kbMap[key1].push(entry);
+
+        const key2 = `_fallback||${aptName}||${Math.round(area)}`;
+        if (!kbMap[key2]) kbMap[key2] = [];
+        kbMap[key2].push(entry);
     });
 }
 
