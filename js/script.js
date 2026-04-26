@@ -82,183 +82,157 @@ function hideLoader() {
     if (el) el.style.display = 'none';
 }
 
-// ═══ 데이터 병렬 로드 ════════════════════════════════
+// ═══ 데이터 로드 ════════════════════════════════════
 function loadAllData() {
-    // 45초 절대 안전장치
+    // 60초 절대 안전망 (30MB CSV 다운로드 고려)
     const guard = setTimeout(() => {
         hideLoader();
-        showEmpty('⏱ 로딩 시간 초과.\napt_trade_data.csv가 index.html과 같은 폴더에 있는지 확인하세요.');
-    }, 45000);
+        showEmpty('⏱ 로딩 시간이 초과됐습니다.\napt_trade_data.csv 파일이 index.html과 같은 폴더에 있는지 확인해 주세요.');
+    }, 60000);
 
-    setLoader('실거래 데이터 로드 중...');
+    setLoader('파일 확인 중...');
 
-    // map.csv는 없어도 진행 (optional), 실패 시 빈 배열
-    const kbSafe = loadCsvSafe('map.csv').then(rows => {
-        if (rows.length) processKbData(rows);
-        const kbCount = Object.keys(kbMap).length;
-        const statusEl = document.getElementById('kb-status');
-        if (statusEl) {
-            statusEl.textContent = kbCount > 0
-                ? `KB 시세 ${kbCount.toLocaleString()}건 ✓`
-                : 'KB 시세 없음';
-            statusEl.className = `kb-status ${kbCount > 0 ? 'loaded' : 'loading'}`;
-        }
-    }).catch(() => {
-        const statusEl = document.getElementById('kb-status');
-        if (statusEl) { statusEl.textContent = 'KB 시세 로드 실패'; statusEl.className = 'kb-status loading'; }
-    });
-
-    // 실거래 데이터는 필수
-    loadCsvSafe('apt_trade_data.csv')
-        .then(tradeRows => {
-            if (!tradeRows.length) throw new Error('apt_trade_data.csv가 비어 있거나 파일이 없습니다.');
+    // ── 실거래 데이터 (필수) ──────────────────────────
+    fetchText('apt_trade_data.csv')
+        .then(text => {
+            if (!text) throw new Error('apt_trade_data.csv 파일을 찾을 수 없습니다.\n파일이 index.html과 같은 폴더에 있어야 합니다.');
+            setLoader('실거래 데이터 파싱 중...');
+            return parseCsv(text);
+        })
+        .then(rows => {
+            if (!rows.length) throw new Error('CSV 데이터가 비어 있습니다.');
 
             setLoader('실거래 데이터 처리 중...');
-            allData = tradeRows
-                .filter(r => getField(r, '아파트') && getField(r, '거래금액_n'))
+            allData = rows
+                .filter(r => r['아파트'] && r['거래금액_n'])
                 .map(r => {
-                    const sidoRaw = getField(r, 'sido') || '미분류';
-                    const sigungu = getField(r, 'sigungu') || '';
-                    const dong    = getField(r, 'dong')    || '';
-                    const price   = parseFloat(getField(r, '거래금액_n'));
-                    const area    = parseFloat(getField(r, '전용면적'));
+                    const sido    = (r['sido'] || '미분류').trim();
+                    const sigungu = (r['sigungu'] || '').trim();
+                    const dong    = (r['dong'] || '').trim();
+                    const price   = parseFloat(r['거래금액_n']) || 0;
+                    const area    = parseFloat(r['전용면적'])   || 0;
                     const pyung   = area / 3.3058;
                     return {
-                        ...r,
+                        sido, sigungu, dong,
+                        gudong:      `${sigungu} ${dong}`.trim(),
+                        areaRound:   Math.round(area),
+                        regStatus:   getRegStatus(sido, sigungu, dong),
                         price,
                         pyung:       pyung.toFixed(1),
-                        pyungPrice:  Math.round(price / pyung),
-                        areaRound:   Math.round(area),
-                        sido:        sidoRaw,
-                        sigungu,
-                        dong,
-                        gudong:      `${sigungu} ${dong}`.trim(),
-                        regStatus:   getRegStatus(sidoRaw, sigungu, dong),
-                        gap:         parseFloat(getField(r, 'gap')          || 0),
-                        jeonseRatio: parseFloat(getField(r, 'jeonseRatio')  || 0),
-                        jeonsePrice: parseFloat(getField(r, 'jeonsePrice')  || 0),
-                        아파트:      getField(r, '아파트')   || '',
-                        전용면적:    getField(r, '전용면적') || '',
-                        층:          getField(r, '층')       || '',
-                        계약년월:    getField(r, '계약년월') || '',
-                        계약일:      getField(r, '계약일')   || '',
+                        pyungPrice:  pyung > 0 ? Math.round(price / pyung) : 0,
+                        gap:         parseFloat(r['gap']          || 0),
+                        jeonseRatio: parseFloat(r['jeonseRatio']  || 0),
+                        jeonsePrice: parseFloat(r['jeonsePrice']  || 0),
+                        아파트:      r['아파트']   || '',
+                        전용면적:    r['전용면적'] || '',
+                        층:          r['층']       || '',
+                        계약년월:    r['계약년월'] || '',
+                        계약일:      r['계약일']   || '',
                     };
                 });
 
             initSidoSelect();
             updateStats();
             document.getElementById('total-count').textContent = allData.length.toLocaleString();
-
             clearTimeout(guard);
             hideLoader();
             renderList();
-
-            // KB는 백그라운드에서 계속 로드되어도 OK
         })
         .catch(err => {
             clearTimeout(guard);
             hideLoader();
-            showEmpty(`❌ 실거래 데이터 로드 실패\n${err.message}`);
+            showEmpty(`❌ ${err.message}`);
         });
+
+    // ── KB 시세 데이터 (선택, 백그라운드 로드) ────────
+    fetchText('map.csv')
+        .then(text => {
+            if (!text) return;
+            return parseCsv(text);
+        })
+        .then(rows => {
+            if (!rows || !rows.length) return;
+            processKbData(rows);
+            const cnt = Object.keys(kbMap).length;
+            const el2 = document.getElementById('kb-status');
+            if (el2) {
+                el2.textContent = `KB 시세 ${cnt.toLocaleString()}건 ✓`;
+                el2.className   = 'kb-status loaded';
+            }
+        })
+        .catch(() => {});  // KB 실패는 조용히 무시
 }
 
-// ── CSV 안전 로드 (에러 시 빈 배열 반환) ──────────────
-function loadCsvSafe(path) {
-    return new Promise(resolve => {
-        const rows  = [];
-        const timer = setTimeout(() => {
-            resolve(rows.length ? rows : []);
-        }, 10000);
+// ── fetch → text (실패 시 null 반환) ────────────────
+function fetchText(path) {
+    return fetch(path)
+        .then(res => res.ok ? res.text() : null)
+        .catch(() => null);
+}
 
-        Papa.parse(path, {
-            download:       true,
+// ── CSV 텍스트 → 배열 파싱 (PapaParse) ──────────────
+function parseCsv(text) {
+    return new Promise(resolve => {
+        Papa.parse(text, {
             header:         true,
             skipEmptyLines: true,
-            chunk: (results) => {
-                rows.push(...results.data);
-            },
-            complete: () => {
-                clearTimeout(timer);
-                resolve(rows);
-            },
-            error: () => {
-                clearTimeout(timer);
-                resolve([]);
-            },
+            complete: results => resolve(results.data || []),
+            error:    ()      => resolve([]),
         });
     });
 }
 
-// ── KB 시세 데이터 처리 ───────────────────────────────
-function processKbData(kbRows) {
-    kbRows.forEach(r => {
-        const aptName = (getField(r, 'apt') || '').trim();
-        const sido    = (getField(r, 'sido')    || '').trim();
-        const sigungu = (getField(r, 'sigungu') || '').trim();
-        const dong    = (getField(r, 'dong')    || '').trim();
-        const area    = parseFloat(getField(r, 'area') || 0);
-        if (!aptName || !area) return;
+// ── KB 시세 kbMap 구축 ───────────────────────────────
+function processKbData(rows) {
+    rows.forEach(r => {
+        const apt  = (r['apt'] || '').trim();
+        const sido = (r['sido'] || '').trim();
+        const sgg  = (r['sigungu'] || '').trim();
+        const area = parseFloat(r['area'] || 0);
+        if (!apt || !area) return;
 
-        const toNum = s => parseFloat(String(s).replace(/,/g, '')) || 0;
+        const toN = s => parseFloat(String(s || '0').replace(/,/g, '')) || 0;
         const entry = {
-            하한가:    toNum(getField(r, '하한가')    || '0'),
-            일반거래가: toNum(getField(r, '일반거래가') || '0'),
-            상한가:    toNum(getField(r, '상한가')    || '0'),
-            area, sido, sigungu, dong,
+            하한가:     toN(r['하한가']),
+            일반거래가: toN(r['일반거래가']),
+            상한가:     toN(r['상한가']),
+            area, sido, sigungu: sgg,
         };
+        const ar = Math.round(area);
 
-        const key1 = `${sido}||${sigungu}||${aptName}||${Math.round(area)}`;
-        if (!kbMap[key1]) kbMap[key1] = [];
-        kbMap[key1].push(entry);
+        // 지역+아파트+면적 정밀 키
+        const k1 = `${sido}||${sgg}||${apt}||${ar}`;
+        if (!kbMap[k1]) kbMap[k1] = [];
+        kbMap[k1].push(entry);
 
-        const key2 = `_fallback||${aptName}||${Math.round(area)}`;
-        if (!kbMap[key2]) kbMap[key2] = [];
-        kbMap[key2].push(entry);
+        // 아파트+면적 폴백 키
+        const k2 = `_fb||${apt}||${ar}`;
+        if (!kbMap[k2]) kbMap[k2] = [];
+        kbMap[k2].push(entry);
     });
 }
 
-// BOM-safe 필드 읽기
-function getField(row, key) {
-    if (row[key] !== undefined) return row[key];
-    // BOM 붙은 경우
-    const bomKey = '\uFEFF' + key;
-    if (row[bomKey] !== undefined) return row[bomKey];
-    return undefined;
-}
-
-// KB 시세 조회 — sido/sigungu 포함 정밀 매칭 → 아파트+면적 폴백
+// ═══ 시도/구동 셀렉트 ════════════════════════════════
 function getKbPrice(aptName, areaStr, sido, sigungu) {
-    const apt  = (aptName || '').trim();
-    const area = parseFloat(areaStr) || 0;
-    const ar   = Math.round(area);
+    const apt = (aptName || '').trim();
+    const ar  = Math.round(parseFloat(areaStr) || 0);
 
-    // 1순위: sido + sigungu 포함 정확 매칭
+    // 1순위: 지역+아파트+면적 정확 매칭 (±5㎡)
     for (let d = 0; d <= 5; d++) {
         for (const delta of (d === 0 ? [0] : [d, -d])) {
-            const key1 = `${sido}||${sigungu}||${apt}||${ar + delta}`;
-            if (kbMap[key1] && kbMap[key1].length) return kbMap[key1][0];
+            const k = `${sido}||${sigungu}||${apt}||${ar + delta}`;
+            if (kbMap[k] && kbMap[k].length) return kbMap[k][0];
         }
     }
 
-    // 2순위: sido만 포함 + 아파트+면적 (sigungu 불일치 보정)
-    // KB sigungu는 '영등포구 '처럼 공백 포함될 수 있으므로 sido로만 필터
-    const fallbackKey = `_fallback||${apt}||${ar}`;
-    if (kbMap[fallbackKey] && kbMap[fallbackKey].length) {
-        // sido가 같은 것 우선
-        const sameArea = kbMap[fallbackKey];
-        const sameSido = sameArea.filter(e => e.sido === sido);
-        if (sameSido.length) return sameSido[0];
-        // sido 없으면 첫 번째 (단일 지역 아파트일 경우)
-        if (sameArea.length === 1) return sameArea[0];
-    }
-
-    // 3순위: 면적 ±5 폴백
-    for (let d = 1; d <= 5; d++) {
-        for (const delta of [d, -d]) {
-            const fk = `_fallback||${apt}||${ar + delta}`;
-            if (kbMap[fk]) {
-                const sameSido = kbMap[fk].filter(e => e.sido === sido);
-                if (sameSido.length) return sameSido[0];
+    // 2순위: 아파트+면적 폴백 (sido 우선)
+    for (let d = 0; d <= 5; d++) {
+        for (const delta of (d === 0 ? [0] : [d, -d])) {
+            const k = `_fb||${apt}||${ar + delta}`;
+            if (kbMap[k] && kbMap[k].length) {
+                const bySido = kbMap[k].filter(e => e.sido === sido);
+                if (bySido.length) return bySido[0];
+                if (kbMap[k].length === 1) return kbMap[k][0];
             }
         }
     }
