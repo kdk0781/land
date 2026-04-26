@@ -518,3 +518,11 @@ function showEmpty(msg){
     const html=msg.split('\n').map(l=>`<p>${l}</p>`).join('');
     g('card-grid').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-msg">${html}</div></div>`;
 }
+
+// 맨 위로 버튼 이벤트 리스너 통합
+(function(){
+    const btn = document.getElementById('scroll-top-btn');
+    window.addEventListener('scroll', () => {
+        btn.classList.toggle('visible', window.scrollY > 300);
+    }, { passive: true });
+})();
