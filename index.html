@@ -44,22 +44,37 @@
     </div>
 </header>
 
-<!-- 통계 배너 -->
+<!-- 통계 + 날짜 필터 통합 배너 -->
 <div class="stats-wrap">
-    <div class="stats-inner">
-        <div class="stat-item">
-            <div class="stat-label">평균 거래가</div>
-            <div class="stat-value" id="stat-avg">—</div>
+    <div class="stats-filter-inner">
+        <!-- 좌: 통계 3종 -->
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="stat-label">평균 거래가</div>
+                <div class="stat-value" id="stat-avg">—</div>
+            </div>
+            <div class="stat-div"></div>
+            <div class="stat-item">
+                <div class="stat-label">중위 거래가</div>
+                <div class="stat-value" id="stat-med">—</div>
+            </div>
+            <div class="stat-div"></div>
+            <div class="stat-item">
+                <div class="stat-label">최고 거래가</div>
+                <div class="stat-value up" id="stat-max">—</div>
+            </div>
         </div>
-        <div class="stat-div"></div>
-        <div class="stat-item">
-            <div class="stat-label">중위 거래가</div>
-            <div class="stat-value" id="stat-med">—</div>
-        </div>
-        <div class="stat-div"></div>
-        <div class="stat-item">
-            <div class="stat-label">최고 거래가</div>
-            <div class="stat-value up" id="stat-max">—</div>
+        <!-- 우: 날짜 필터 -->
+        <div class="date-filter-row">
+            <div class="date-filter-group">
+                <label class="date-label">거래기간</label>
+                <div class="date-inputs">
+                    <input type="month" id="date-from" class="date-input" title="시작 연월">
+                    <span class="date-sep">~</span>
+                    <input type="month" id="date-to"   class="date-input" title="종료 연월">
+                </div>
+            </div>
+            <span id="date-error" class="date-error"></span>
         </div>
     </div>
 </div>
