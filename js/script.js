@@ -8,42 +8,52 @@ let currentRegStatus = '비규제지역';
 let currentKbPrice   = 0;   // 현재 모달의 KB일반거래가
 let activeModalTab   = 'loan';
 
-// ═══ 규제지역 (2025.10.16 10.15대책 이후 기준) ════════
-// 투기과열지구 = 조정대상지역 동시 지정
-// ▶ 서울특별시 전역 (25개 구)
-// ▶ 경기도 12개: 과천시·광명시·의왕시·하남시·
-//   성남(분당·수정·중원)·수원(영통·장안·팔달)·안양동안·용인수지
+// ═══ 규제지역 (2025.10.16 기준, dong 기반 판별) ══════
+// CSV의 sigungu가 시단위(성남시/수원시/안양시/용인시)로만 저장되므로
+// dong으로 구를 역추론해 규제 여부 판별
 
-// 서울 전체를 투기과열로 처리 (별도 구 지정 불필요)
-const REG_SEOUL = true; // 서울 전역
+// 서울 → 전역 투기과열
+// 경기 직접 시군구 규제 (과천·광명·의왕·하남)
+const REG_GU_DIRECT = new Set(['과천시','광명시','의왕시','하남시']);
 
-// 경기도 투기과열 12개 지역 (fetch_data.py DISTRICT_MAP의 sigungu 기준)
-const REG_GU_SPEC = new Set([
-    '과천시',
-    '광명시',
-    '의왕시',
-    '하남시',
-    '성남수정구',
-    '성남중원구',
-    '성남분당구',
-    '수원장안구',
-    '수원팔달구',   // 수원권선구는 비규제
-    '수원영통구',
-    '안양동안구',   // 안양만안구는 비규제
-    '용인수지구',   // 용인처인구·기흥구는 비규제
-]);
+// 성남시 분당구 동 (투기과열)
+const BUNDANG_DONG  = new Set(['구미동','금곡동','대장동','백현동','분당동','삼평동','서현동','수내동','야탑동','운중동','이매동','정자동','판교동']);
+// 성남시 수정구 동 (투기과열)
+const SUJEONG_DONG  = new Set(['고등동','단대동','수진동','신흥동','양지동','창곡동','태평동']);
+// 성남시 중원구 동 (투기과열)
+const JUNGWON_DONG  = new Set(['금광동','도촌동','상대원동','성남동','여수동','은행동','중앙동','하대원동']);
+// 수원시 영통구 동 (투기과열)
+const YEONGTONG_DONG= new Set(['망포동','매탄동','신동','영통동','원천동','이의동','하동']);
+// 수원시 장안구 동 (투기과열)
+const JANGAN_DONG   = new Set(['송죽동','연무동','영화동','율전동','이목동','정자동','조원동','천천동','파장동']);
+// 수원시 팔달구 동 (투기과열)
+const PALDAL_DONG   = new Set(['고등동','교동','매교동','매산로2가','매산로3가','우만동','인계동','지동','화서동']);
+// 안양시 동안구 동 (투기과열)
+const DONGAN_DONG   = new Set(['관양동','귀인동','비산동','평촌동','호계동']);
+// 용인시 수지구 동 (투기과열)
+const SUJI_DONG     = new Set(['동천동','상현동','성복동','신봉동','죽전동','풍덕천동']);
 
-// 규제 등급 반환
-// 'SPEC'  : 투기과열지구+조정대상지역 → LTV 40%
-// 'NONE'  : 비규제 → LTV 70%
-function getRegGrade(sido, sigungu) {
+function getRegGrade(sido, sigungu, dong) {
     if (sido === '서울특별시') return 'SPEC';
-    if (sido === '경기도' && REG_GU_SPEC.has(sigungu)) return 'SPEC';
+    if (sido !== '경기도')    return 'NONE';
+
+    if (REG_GU_DIRECT.has(sigungu)) return 'SPEC';
+
+    const d = (dong || '').trim();
+    if (sigungu === '성남시') {
+        if (BUNDANG_DONG.has(d) || SUJEONG_DONG.has(d) || JUNGWON_DONG.has(d)) return 'SPEC';
+    }
+    if (sigungu === '수원시') {
+        if (YEONGTONG_DONG.has(d) || JANGAN_DONG.has(d) || PALDAL_DONG.has(d)) return 'SPEC';
+    }
+    if (sigungu === '안양시' && DONGAN_DONG.has(d)) return 'SPEC';
+    if (sigungu === '용인시' && SUJI_DONG.has(d))   return 'SPEC';
+
     return 'NONE';
 }
 
-function getRegStatus(sido, sigungu) {
-    return getRegGrade(sido, sigungu) === 'SPEC' ? '투기과열지구' : '비규제지역';
+function getRegStatus(sido, sigungu, dong) {
+    return getRegGrade(sido, sigungu, dong) === 'SPEC' ? '투기과열지구' : '비규제지역';
 }
 
 // ═══ 중개수수료 요율표 ════════════════════════════════
@@ -110,7 +120,7 @@ function loadAllData() {
                         sigungu,
                         dong,
                         gudong:      `${sigungu} ${dong}`.trim(),
-                        regStatus:   getRegStatus(sidoRaw, sigungu),
+                        regStatus:   getRegStatus(sidoRaw, sigungu, dong),
                         gap:         parseFloat(getField(r, 'gap')         || 0),
                         jeonseRatio: parseFloat(getField(r, 'jeonseRatio') || 0),
                         jeonsePrice: parseFloat(getField(r, 'jeonsePrice') || 0),
@@ -125,25 +135,32 @@ function loadAllData() {
             // ── KB 시세 처리 ──
             setLoader('KB 시세 데이터 처리 중...');
             kbRows.forEach(r => {
-                // map.csv 컬럼: sido,sigungu,dong,apt,type1,area,type2,pyung,하한가,일반거래가,상한가
-                const aptName = getField(r, 'apt') || getField(r, '아파트');
-                const area    = parseFloat(getField(r, 'area') || getField(r, '전용면적') || 0);
-                const lowStr  = getField(r, '하한가')    || '0';
-                const midStr  = getField(r, '일반거래가') || '0';
-                const highStr = getField(r, '상한가')    || '0';
+                const aptName  = (getField(r, 'apt') || '').trim();
+                const sigungu  = (getField(r, 'sigungu') || '').trim();
+                const dong     = (getField(r, 'dong')    || '').trim();
+                const sido     = (getField(r, 'sido')    || '').trim();
+                const areaStr  = getField(r, 'area') || '0';
+                const area     = parseFloat(areaStr) || 0;
 
                 if (!aptName || !area) return;
 
-                const toNum = s => parseFloat(String(s).replace(/,/g,'')) || 0;
-                const key = `${aptName.trim()}||${Math.round(area)}`;
-                // 동일 아파트 여러 평형 → 모두 저장 (배열)
-                if (!kbMap[key]) kbMap[key] = [];
-                kbMap[key].push({
-                    하한가:    toNum(lowStr),
-                    일반거래가: toNum(midStr),
-                    상한가:    toNum(highStr),
-                    area,
-                });
+                const toNum = s => parseFloat(String(s).replace(/,/g, '')) || 0;
+                const entry = {
+                    하한가:    toNum(getField(r, '하한가')    || '0'),
+                    일반거래가: toNum(getField(r, '일반거래가') || '0'),
+                    상한가:    toNum(getField(r, '상한가')    || '0'),
+                    area, sigungu, dong, sido,
+                };
+
+                // 키1: 지역+아파트+면적 (정확 매칭용)
+                const key1 = `${sido}||${sigungu}||${aptName}||${Math.round(area)}`;
+                if (!kbMap[key1]) kbMap[key1] = [];
+                kbMap[key1].push(entry);
+
+                // 키2: 아파트+면적만 (폴백용, 지역 불명확할 때)
+                const key2 = `_fallback||${aptName}||${Math.round(area)}`;
+                if (!kbMap[key2]) kbMap[key2] = [];
+                kbMap[key2].push(entry);
             });
 
             const kbCount = Object.keys(kbMap).length;
@@ -192,27 +209,51 @@ function getField(row, key) {
     return undefined;
 }
 
-// KB 시세 조회 (기본 - 아파트명+면적 매칭)
-function getKbPrice(aptName, areaStr) {
+// KB 시세 조회 — sido/sigungu 포함 정밀 매칭 → 아파트+면적 폴백
+function getKbPrice(aptName, areaStr, sido, sigungu) {
+    const apt  = (aptName || '').trim();
     const area = parseFloat(areaStr) || 0;
-    let key = `${aptName.trim()}||${Math.round(area)}`;
-    if (kbMap[key] && kbMap[key].length) return kbMap[key][0];
-    for (let d = 1; d <= 5; d++) {
-        key = `${aptName.trim()}||${Math.round(area) + d}`;
-        if (kbMap[key]) return kbMap[key][0];
-        key = `${aptName.trim()}||${Math.round(area) - d}`;
-        if (kbMap[key]) return kbMap[key][0];
+    const ar   = Math.round(area);
+
+    // 1순위: sido + sigungu 포함 정확 매칭
+    for (let d = 0; d <= 5; d++) {
+        for (const delta of (d === 0 ? [0] : [d, -d])) {
+            const key1 = `${sido}||${sigungu}||${apt}||${ar + delta}`;
+            if (kbMap[key1] && kbMap[key1].length) return kbMap[key1][0];
+        }
     }
+
+    // 2순위: sido만 포함 + 아파트+면적 (sigungu 불일치 보정)
+    // KB sigungu는 '영등포구 '처럼 공백 포함될 수 있으므로 sido로만 필터
+    const fallbackKey = `_fallback||${apt}||${ar}`;
+    if (kbMap[fallbackKey] && kbMap[fallbackKey].length) {
+        // sido가 같은 것 우선
+        const sameArea = kbMap[fallbackKey];
+        const sameSido = sameArea.filter(e => e.sido === sido);
+        if (sameSido.length) return sameSido[0];
+        // sido 없으면 첫 번째 (단일 지역 아파트일 경우)
+        if (sameArea.length === 1) return sameArea[0];
+    }
+
+    // 3순위: 면적 ±5 폴백
+    for (let d = 1; d <= 5; d++) {
+        for (const delta of [d, -d]) {
+            const fk = `_fallback||${apt}||${ar + delta}`;
+            if (kbMap[fk]) {
+                const sameSido = kbMap[fk].filter(e => e.sido === sido);
+                if (sameSido.length) return sameSido[0];
+            }
+        }
+    }
+
     return null;
 }
 
-// ★ 층수 반영 KB 기준가 반환
-// 1층 → 하한가 (선순위 전세처럼 감가), 나머지 → 일반거래가
-function getKbRefPrice(aptName, areaStr, floor) {
-    const kb = getKbPrice(aptName, areaStr);
+// 층수 반영 KB 기준가: 1층=하한가, 그외=일반거래가
+function getKbRefPrice(aptName, areaStr, floor, sido, sigungu) {
+    const kb = getKbPrice(aptName, areaStr, sido, sigungu);
     if (!kb) return 0;
-    const floorNum = parseInt(floor) || 1;
-    return floorNum === 1 ? kb.하한가 : kb.일반거래가;
+    return parseInt(floor) === 1 ? kb.하한가 : kb.일반거래가;
 }
 
 // ═══ 시도/구동 셀렉트 ════════════════════════════════
@@ -318,7 +359,7 @@ function renderList() {
         // KB 시세 vs 실거래가 비교 (층수 반영)
         const grp = {};
         filtered.forEach(d => {
-            const kb = getKbPrice(d.아파트, d.전용면적);
+            const kb = getKbPrice(d.아파트, d.전용면적, d.sido, d.sigungu);
             if (!kb) return;
             const k = `${d.아파트}||${d.areaRound}`;
             if (!grp[k] || d.price > grp[k].price) grp[k] = { ...d, kb };
@@ -365,8 +406,8 @@ function kbChip(tradePrice, kb, floor) {
 }
 
 function cardDefault(d) {
-    const kb    = getKbPrice(d.아파트, d.전용면적);
-    const kbRef = getKbRefPrice(d.아파트, d.전용면적, d.층);
+    const kb    = getKbPrice(d.아파트, d.전용면적, d.sido, d.sigungu);
+    const kbRef = kb ? (parseInt(d.층) === 1 ? kb.하한가 : kb.일반거래가) : 0;
     const ym    = String(d.계약년월);
     const date  = `${ym.slice(0,4)}.${ym.slice(4)}.${String(d.계약일).padStart(2,'0')}`;
     return `
@@ -389,8 +430,8 @@ function cardDefault(d) {
 </div>`;
 }
 
-function cardVolume(d, idx) {
-    const kbRef = getKbRefPrice(d.아파트, d.전용면적, d.층 || '2'); // 거래량은 대표층 모르므로 일반가 기준
+    const kb    = getKbPrice(d.아파트, d.전용면적, d.sido, d.sigungu);
+    const kbRef = kb ? kb.일반거래가 : 0;
     return `
 <div class="card card-rank ${idx<3?'top':''}" onclick="openHistory('${esc(d.아파트)}','${esc(d.sido)}','${esc(d.gudong)}')">
   <div class="badge-row">
@@ -410,7 +451,7 @@ function cardVolume(d, idx) {
 }
 
 function cardGap(d, idx) {
-    const kb = getKbPrice(d.아파트, d.전용면적);
+    const kb = getKbPrice(d.아파트, d.전용면적, d.sido, d.sigungu);
     return `
 <div class="card" onclick="openHistory('${esc(d.아파트)}','${esc(d.sido)}','${esc(d.gudong)}')">
   <div style="position:absolute;top:0;right:0;background:var(--green);color:#fff;font-size:.58rem;font-weight:900;padding:.25rem .6rem;border-bottom-left-radius:.5rem">전세가율 ${Number(d.jeonseRatio).toFixed(1)}%</div>
