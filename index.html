@@ -12,7 +12,6 @@
 </head>
 <body>
 
-<!-- 로더 -->
 <div id="loader">
     <div class="loader-spinner"></div>
     <div class="loader-bar"><div class="loader-bar-fill"></div></div>
@@ -20,7 +19,6 @@
     <p class="loader-hint">trade_seoul.json · trade_gyeonggi_a.json<br>trade_gyeonggi_b.json · trade_incheon.json · kb.json</p>
 </div>
 
-<!-- 헤더 -->
 <header class="app-header">
     <div class="header-inner">
         <div class="header-top">
@@ -44,10 +42,8 @@
     </div>
 </header>
 
-<!-- 통계 + 날짜 필터 통합 배너 -->
 <div class="stats-wrap">
     <div class="stats-filter-inner">
-        <!-- 좌: 통계 3종 -->
         <div class="stats-row">
             <div class="stat-item">
                 <div class="stat-label">평균 거래가</div>
@@ -64,7 +60,6 @@
                 <div class="stat-value up" id="stat-max">—</div>
             </div>
         </div>
-        <!-- 우: 날짜 필터 -->
         <div class="date-filter-row">
             <div class="date-filter-group">
                 <label class="date-label">거래기간</label>
@@ -79,7 +74,6 @@
     </div>
 </div>
 
-<!-- 필터 -->
 <div class="filter-wrap">
     <div class="filter-inner">
         <select id="sido-select" class="f-select">
@@ -92,15 +86,11 @@
     </div>
 </div>
 
-<!-- 카드 그리드 -->
 <main class="main-wrap">
     <div class="card-grid" id="card-grid"></div>
 </main>
 
 
-<!-- ════════════════════════════════════════
-     거래 이력 모달
-════════════════════════════════════════ -->
 <div id="history-modal" class="modal-overlay">
     <div class="modal-sheet">
         <div class="modal-handle"></div>
@@ -116,9 +106,6 @@
 </div>
 
 
-<!-- ════════════════════════════════════════
-     대출/취득세/중개수수료 모달
-════════════════════════════════════════ -->
 <div id="dsr-modal" class="modal-overlay">
     <div class="modal-sheet">
         <div class="modal-handle"></div>
@@ -131,7 +118,6 @@
             <button class="modal-close" onclick="closeModal('dsr-modal')">✕</button>
         </div>
 
-        <!-- 실거래가 vs KB시세 비교 박스 -->
         <div class="price-compare-box">
             <div class="pcb-cell" id="pcb-cell-trade">
                 <div class="pcb-label">실거래가</div>
@@ -152,7 +138,6 @@
 
         <div class="modal-body">
 
-            <!-- 공통: 생애최초 토글 -->
             <div class="toggle-box">
                 <div class="toggle-info">
                     <div class="toggle-title">🏠 생애최초 주택구입</div>
@@ -165,7 +150,6 @@
                 </label>
             </div>
 
-            <!-- 공통: 가격 inputs -->
             <div class="form-grid">
                 <div class="form-group" style="margin-bottom:0">
                     <label class="form-label">실거래가 (만원)</label>
@@ -182,7 +166,6 @@
                 <span style="font-size:.6rem;font-weight:700;color:var(--amber)" id="calc-base-note"></span>
             </div>
 
-            <!-- ── 대출 패널 ── -->
             <div id="panel-loan" class="modal-panel">
                 <div class="form-group">
                     <label class="form-label">연간 소득 (만원)</label>
@@ -221,7 +204,6 @@
                 </div>
             </div>
 
-            <!-- ── 취득세 패널 ── -->
             <div id="panel-tax" class="modal-panel hidden">
                 <div class="form-group">
                     <label class="form-label">취득 후 보유 주택 수</label>
@@ -249,7 +231,6 @@
                 </div>
             </div>
 
-            <!-- ── 중개수수료 패널 ── -->
             <div id="panel-fee" class="modal-panel hidden">
                 <div class="calc-box">
                     <div class="calc-row"><span class="calc-row-label">적용 요율</span><span class="calc-row-value" id="fee-rate">—</span></div>
@@ -268,21 +249,10 @@
                 </div>
             </div>
 
-        </div><!-- /modal-body -->
-    </div>
+        </div></div>
 </div>
 
-<!-- 맨 위로 버튼 -->
 <button id="scroll-top-btn" title="맨 위로" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
-
-<script>
-(function(){
-    const btn = document.getElementById('scroll-top-btn');
-    window.addEventListener('scroll', () => {
-        btn.classList.toggle('visible', window.scrollY > 300);
-    }, { passive: true });
-})();
-</script>
 
 </body>
 </html>
