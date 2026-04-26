@@ -189,22 +189,97 @@ body {
     box-shadow: 0 0 16px rgba(47,129,247,.35);
 }
 
-/* ═══ 통계 배너 ═════════════════════════════════════ */
+/* ═══ 통계 + 날짜필터 통합 배너 ═══════════════════════ */
 .stats-wrap {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
 }
-.stats-inner {
+.stats-filter-inner {
     max-width: 1400px;
     margin: 0 auto;
     padding: .6rem 1.5rem;
     display: flex;
-    gap: 1.5rem;
     align-items: center;
-    overflow-x: auto;
-    -ms-overflow-style: none; scrollbar-width: none;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
 }
-.stats-inner::-webkit-scrollbar { display: none; }
+
+/* 통계 3종 (좌) */
+.stats-row {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    flex-shrink: 0;
+}
+
+/* 날짜 필터 (우) */
+.date-filter-row {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    flex-wrap: wrap;
+}
+.date-filter-group {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+.date-label {
+    font-size: .65rem;
+    font-weight: 800;
+    color: var(--text3);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.date-inputs {
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+}
+.date-input {
+    padding: .35rem .6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface2);
+    color: var(--text1);
+    font-family: 'DM Mono', monospace;
+    font-size: .72rem;
+    font-weight: 600;
+    outline: none;
+    transition: border-color .2s;
+    cursor: pointer;
+    min-width: 0;
+}
+.date-input:focus { border-color: var(--blue); }
+.date-sep {
+    font-size: .72rem;
+    font-weight: 700;
+    color: var(--text3);
+    flex-shrink: 0;
+}
+.date-error {
+    font-size: .65rem;
+    font-weight: 700;
+    color: var(--red);
+}
+
+/* 태블릿: 날짜필터 아래로 */
+@media (max-width: 768px) {
+    .stats-filter-inner {
+        padding: .6rem 1rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: .5rem;
+    }
+    .stats-row { gap: 1rem; }
+}
+/* 모바일 */
+@media (max-width: 520px) {
+    .date-input { font-size: .65rem; padding: .3rem .5rem; }
+    .stats-row { gap: .75rem; }
+}
 
 .stat-item { flex-shrink: 0; }
 .stat-label { font-size: .6rem; font-weight: 800; color: var(--text3); letter-spacing: .06em; text-transform: uppercase; }
