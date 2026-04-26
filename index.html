@@ -257,5 +257,17 @@
     </div>
 </div>
 
+<!-- 맨 위로 버튼 -->
+<button id="scroll-top-btn" title="맨 위로" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+<script>
+(function(){
+    const btn = document.getElementById('scroll-top-btn');
+    window.addEventListener('scroll', () => {
+        btn.classList.toggle('visible', window.scrollY > 300);
+    }, { passive: true });
+})();
+</script>
+
 </body>
 </html>
