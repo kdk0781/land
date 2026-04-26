@@ -318,8 +318,8 @@ body {
     cursor: pointer;
 }
 .f-select:focus, .f-input:focus { border-color: var(--blue); }
-.f-select { min-width: 140px; }
-.f-input { flex: 1; min-width: 200px; }
+.f-select { min-width: 110px; }
+.f-input { flex: 1; min-width: 180px; }
 .f-input::placeholder { color: var(--text3); }
 
 /* ═══ 메인 컨텐츠 ════════════════════════════════════ */
@@ -824,7 +824,30 @@ body {
 .modal-body::-webkit-scrollbar-track { background:transparent; }
 .modal-body::-webkit-scrollbar-thumb { background:var(--border2); border-radius:999px; }
 
-/* ═══ 맨 위로 버튼 ═══════════════════════════════════ */
+/* ═══ 날짜 칩 ════════════════════════════════════════ */
+.card-date-row {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    font-size: .7rem;
+    font-weight: 700;
+    color: var(--text2);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: .375rem;
+    padding: .25rem .6rem;
+    margin: .375rem 0 .5rem;
+    letter-spacing: .01em;
+}
+
+/* 거래이력 모달 날짜 */
+.history-date-full {
+    font-size: .72rem;
+    font-weight: 700;
+    color: var(--text2);
+    min-width: 7rem;
+    font-family: 'Pretendard', sans-serif;
+}
 #scroll-top-btn {
     position: fixed;
     bottom: 1.5rem;
