@@ -1,12 +1,6 @@
 """
 fetch_data.py - 전국 아파트 실거래 + 전세 데이터 수집
-GitHub Actions 자동 실행 / 로컬 수동 실행 모두 지원
-
-개선사항:
-  - concurrent.futures로 병렬 요청 (최대 20개 동시)
-  - 타임아웃 15초 → 5초 (공공API 정상 응답 기준)
-  - 재시도 1회 추가 (일시적 오류 대응)
-  - 순차 실행 대비 예상 시간: ~8분 → ~1분 30초
+병렬 처리 + stdout 즉시 출력 + connect/read 타임아웃 분리
 """
 
 import requests
@@ -14,19 +8,21 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-import urllib3
+import time, sys, os
 
+# stdout 즉시 출력 (GitHub Actions 로그 버퍼링 방지)
+os.environ['PYTHONUNBUFFERED'] = '1'
+def log(msg):
+    print(msg, flush=True)
+
+import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_KEY = '4dc9ae5186b8259cfa06a26e9aa19e5c2758fb51804d6a48165b7f8ae499d50a'
-
+API_KEY  = '4dc9ae5186b8259cfa06a26e9aa19e5c2758fb51804d6a48165b7f8ae499d50a'
 BASE_URL = "https://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/"
-TIMEOUT  = 5    # 초 (공공API 정상 응답은 1~2초)
-WORKERS  = 20   # 동시 요청 수 (공공API 과부하 방지)
+TIMEOUT  = (3, 8)   # (connect초, read초) - 분리 설정
+WORKERS  = 30       # 동시 요청 수
 
-# ─── 지역코드 맵 ──────────────────────────────────────────────
-# 시군구: 실거래 CSV sigungu와 일치 (시 단위, 구 단위 제거)
 DISTRICT_MAP = {
     # ── 서울특별시 (25개)
     '11110':('서울특별시','종로구'),   '11140':('서울특별시','중구'),
@@ -63,18 +59,18 @@ DISTRICT_MAP = {
     '28245':('인천광역시','계양구'),   '28260':('인천광역시','서구'),
     '28710':('인천광역시','강화군'),   '28720':('인천광역시','옹진군'),
     # ── 광주광역시 (5개)
-    '29110':('광주광역시','동구'),     '29140':('광주광역시','서구'),
-    '29155':('광주광역시','남구'),     '29170':('광주광역시','북구'),
+    '29110':('광주광역시','동구'),   '29140':('광주광역시','서구'),
+    '29155':('광주광역시','남구'),   '29170':('광주광역시','북구'),
     '29200':('광주광역시','광산구'),
     # ── 대전광역시 (5개)
-    '30110':('대전광역시','동구'),     '30140':('대전광역시','중구'),
-    '30170':('대전광역시','서구'),     '30200':('대전광역시','유성구'),
+    '30110':('대전광역시','동구'),   '30140':('대전광역시','중구'),
+    '30170':('대전광역시','서구'),   '30200':('대전광역시','유성구'),
     '30230':('대전광역시','대덕구'),
     # ── 울산광역시 (5개)
-    '31110':('울산광역시','중구'),     '31140':('울산광역시','남구'),
-    '31170':('울산광역시','동구'),     '31200':('울산광역시','북구'),
+    '31110':('울산광역시','중구'),   '31140':('울산광역시','남구'),
+    '31170':('울산광역시','동구'),   '31200':('울산광역시','북구'),
     '31710':('울산광역시','울주군'),
-    # ── 세종특별자치시 (1개)
+    # ── 세종특별자치시
     '36110':('세종특별자치시','세종시'),
     # ── 경기도 (42개)
     '41111':('경기도','수원시'),  '41113':('경기도','수원시'),
@@ -167,89 +163,103 @@ DISTRICT_MAP = {
     '48840':('경상남도','남해군'), '48850':('경상남도','하동군'),
     '48860':('경상남도','산청군'), '48870':('경상남도','함양군'),
     '48880':('경상남도','거창군'), '48890':('경상남도','합천군'),
-    # ── 제주특별자치도 (2개)
+    # ── 제주특별자치도
     '50110':('제주특별자치도','제주시'),
     '50130':('제주특별자치도','서귀포시'),
 }
 
-today  = datetime.now()
-months = [today.strftime('%Y%m'),
-          (today.replace(day=1) - timedelta(days=1)).strftime('%Y%m')]
+today = datetime.now()
+# 당월 + 전월 (2달치 수집)
+months = [
+    today.strftime('%Y%m'),
+    (today.replace(day=1) - timedelta(days=1)).strftime('%Y%m'),
+]
+
+# ─── 세션 재사용 (연결 오버헤드 감소) ────────────────────────
+session = requests.Session()
+session.verify = False
 
 
-def _fetch_one(url_type, lawd_cd, sido, sigungu, ymd, retry=1):
-    """단일 API 요청 (실패 시 1회 재시도)"""
-    endpoint = "getRTMSDataSvcAptTradeDev" if url_type == 'trade' else "getRTMSDataSvcAptRentDev"
+def _fetch_one(url_type, lawd_cd, sido, sigungu, ymd):
+    """단일 API 요청 — connect/read 타임아웃 분리, 실패 시 빈 리스트"""
+    endpoint = ("getRTMSDataSvcAptTradeDev" if url_type == 'trade'
+                else "getRTMSDataSvcAptRentDev")
     url = f"{BASE_URL}{endpoint}?serviceKey={API_KEY}&LAWD_CD={lawd_cd}&DEAL_YMD={ymd}"
-    for attempt in range(retry + 1):
-        try:
-            res  = requests.get(url, timeout=TIMEOUT, verify=False)
-            root = ET.fromstring(res.content)
-            items = []
-            for item in root.findall('.//item'):
-                d = {c.tag: c.text.strip() if c.text else '' for c in item}
-                if url_type == 'rent' and d.get('전월세구분') != '전세':
-                    continue
-                d['sido']    = sido
-                d['sigungu'] = sigungu
-                d['dong']    = d.get('법정동', '').strip()
-                items.append(d)
-            return items
-        except Exception:
-            if attempt < retry:
-                time.sleep(0.5)
-    return []
+    try:
+        res  = session.get(url, timeout=TIMEOUT)
+        root = ET.fromstring(res.content)
+        items = []
+        for item in root.findall('.//item'):
+            d = {c.tag: (c.text or '').strip() for c in item}
+            if url_type == 'rent' and d.get('전월세구분') != '전세':
+                continue
+            d['sido']    = sido
+            d['sigungu'] = sigungu
+            d['dong']    = d.get('법정동', '').strip()
+            items.append(d)
+        return items
+    except Exception:
+        return []   # 타임아웃/오류 → 빈 리스트, 전체 중단 없음
 
 
-def fetch_parallel(url_type, label):
+def fetch_all(url_type, label):
     """병렬 요청으로 전국 데이터 수집"""
-    # 작업 목록 생성: (lawd_cd, sido, sigungu, ymd)
     tasks = [
         (code, sido, sigungu, m)
         for code, (sido, sigungu) in DISTRICT_MAP.items()
         for m in months
     ]
-    results = []
-    done = 0
-    t0 = time.time()
+    total  = len(tasks)
+    done   = 0
+    result = []
+    t0     = time.time()
+
+    log(f"[{label}] 시작: {total}건 요청 / 동시 {WORKERS}개")
 
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         future_map = {
-            executor.submit(_fetch_one, url_type, code, sido, sigungu, m): (code, m)
-            for code, sido, sigungu, m in tasks
+            executor.submit(_fetch_one, url_type, code, sido, sigungu, m): i
+            for i, (code, sido, sigungu, m) in enumerate(tasks)
         }
         for future in as_completed(future_map):
-            results.extend(future.result())
+            result.extend(future.result())
             done += 1
-            if done % 100 == 0:
+            # 50건마다 진행상황 출력 (GitHub Actions 로그에 즉시 반영)
+            if done % 50 == 0 or done == total:
                 elapsed = time.time() - t0
-                print(f"  [{label}] {done}/{len(tasks)} 완료 ({elapsed:.0f}초)")
+                pct = done / total * 100
+                log(f"  [{label}] {done}/{total} ({pct:.0f}%) | "
+                    f"수집 {len(result):,}건 | {elapsed:.0f}초 경과")
 
     elapsed = time.time() - t0
-    print(f"  [{label}] 완료: {len(results):,}건 ({elapsed:.1f}초)")
-    return results
+    log(f"[{label}] 완료: {len(result):,}건 ({elapsed:.1f}초)\n")
+    return result
 
 
 # ─── 실행 ──────────────────────────────────────────────────────
 t_start = time.time()
 total_codes = len(DISTRICT_MAP)
-print(f"전국 {total_codes}개 지역코드 × {len(months)}개월 × 2종(매매+전세)")
-print(f"총 API 요청: {total_codes * len(months) * 2}건 / 동시 {WORKERS}개")
-print()
+log("=" * 55)
+log(f"전국 실거래 데이터 수집 시작")
+log(f"  지역코드: {total_codes}개 | 월수: {len(months)} | 동시: {WORKERS}")
+log(f"  타임아웃: connect={TIMEOUT[0]}s / read={TIMEOUT[1]}s")
+log(f"  총 API 요청: {total_codes * len(months) * 2}건")
+log("=" * 55)
 
-print("[1/2] 매매 데이터 수집...")
-all_t = fetch_parallel('trade', '매매')
+log("[1/2] 매매 데이터 수집...")
+all_t = fetch_all('trade', '매매')
 
-print("[2/2] 전세 데이터 수집...")
-all_r = fetch_parallel('rent', '전세')
+log("[2/2] 전세 데이터 수집...")
+all_r = fetch_all('rent', '전세')
 
-print(f"\n수집 완료: 매매 {len(all_t):,}건, 전세 {len(all_r):,}건")
+log(f"수집 완료: 매매 {len(all_t):,}건 / 전세 {len(all_r):,}건")
+
+if not all_t:
+    log("❌ 매매 데이터 없음 - 저장 중단")
+    sys.exit(1)
 
 # ─── DataFrame 처리 ────────────────────────────────────────────
-if not all_t:
-    print("❌ 매매 데이터 없음 - 저장 중단")
-    exit(1)
-
+log("데이터 처리 중...")
 dt = pd.DataFrame(all_t)
 dt['아파트']     = dt['아파트'].str.strip()
 dt['거래금액_n'] = dt['거래금액'].str.replace(',', '').astype(float)
@@ -274,11 +284,12 @@ df['jeonsePrice'] = df['보증금']
 df['gap']         = df['거래금액_n'] - df['보증금']
 df['jeonseRatio'] = (df['보증금'] / df['거래금액_n'] * 100).round(1).fillna(0)
 
-out = df[['sido', 'sigungu', 'dong', '아파트',
-          '전용면적', '층', '계약년월', '계약일',
-          '거래금액_n', 'jeonsePrice', 'gap', 'jeonseRatio']].copy()
-out = out.drop_duplicates()
+out_cols = ['sido', 'sigungu', 'dong', '아파트',
+            '전용면적', '층', '계약년월', '계약일',
+            '거래금액_n', 'jeonsePrice', 'gap', 'jeonseRatio']
+out = df[out_cols].drop_duplicates()
 out.to_csv('apt_trade_data.csv', index=False, encoding='utf-8-sig')
 
 elapsed = time.time() - t_start
-print(f"\n✅ 완료! 총 {len(out):,}건 → apt_trade_data.csv ({elapsed:.1f}초)")
+log(f"✅ 저장 완료: {len(out):,}건 → apt_trade_data.csv")
+log(f"총 소요 시간: {elapsed:.1f}초 ({elapsed/60:.1f}분)")
