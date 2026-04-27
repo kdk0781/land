@@ -2,12 +2,14 @@ name: Daily Property Data Update
 
 on:
   schedule:
-    - cron: '0 18 * * 1-5'  # UTC 18:00 (KST 03:00), 평일만
+    - cron: '0 18 * * 1-5'  # UTC 18:00 = KST 03:00, 평일만
   workflow_dispatch:          # 수동 실행 버튼
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30       # 최대 30분 (초과 시 자동 종료)
+
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v3
@@ -20,22 +22,46 @@ jobs:
       - name: 의존성 설치
         run: pip install requests pandas
 
-      - name: 실거래 데이터 수집 (fetch_data.py)
+      # ── Step 1: 전국 실거래 데이터 수집 ──────────────────────
+      - name: 전국 실거래 데이터 수집 (fetch_data.py)
+        timeout-minutes: 15   # 이 단계만 최대 15분
         run: python fetch_data.py
 
+      # ── Step 2: CSV 커밋 ──────────────────────────────────────
       - name: apt_trade_data.csv 커밋
         run: |
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add apt_trade_data.csv
-          git commit -m "데이터 업데이트: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
+          git commit -m "실거래 업데이트: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
           git push
 
+      # ── Step 3: CSV → JSON 변환 ───────────────────────────────
       - name: CSV → JSON 변환 (update_all.py)
+        timeout-minutes: 5    # 이 단계는 2분 이내 완료
         run: python update_all.py
 
-      - name: JSON 파일 커밋 및 배포
+      # ── Step 4: 전국 JSON 커밋 ───────────────────────────────
+      - name: 전국 JSON 파일 커밋 및 배포
         run: |
-          git add trade_seoul.json trade_gyeonggi_a.json trade_gyeonggi_b.json trade_incheon.json
-          git commit -m "JSON 자동 갱신: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
+          git add \
+            trade_seoul.json \
+            trade_gyeonggi_a.json \
+            trade_gyeonggi_b.json \
+            trade_incheon.json \
+            trade_busan.json \
+            trade_daegu.json \
+            trade_gwangju.json \
+            trade_daejeon.json \
+            trade_ulsan.json \
+            trade_sejong.json \
+            trade_gangwon.json \
+            trade_chungbuk.json \
+            trade_chungnam.json \
+            trade_jeonbuk.json \
+            trade_jeonnam.json \
+            trade_gyeongbuk.json \
+            trade_gyeongnam.json \
+            trade_jeju.json
+          git commit -m "JSON 갱신: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
           git push
