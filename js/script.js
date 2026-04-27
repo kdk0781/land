@@ -70,7 +70,11 @@ const TRADE_FILES = [
 ];
 
 // ═══ 초기화
-document.addEventListener('DOMContentLoaded', () => { setupEvents(); loadData(); });
+document.addEventListener('DOMContentLoaded', () => {
+    initSelects(); // ← 페이지 열자마자 전국 sido 목록 선 렌더링
+    setupEvents();
+    loadData();
+});
 function setLoader(t) { const e=document.querySelector('.loader-text'); if(e) e.textContent=t; }
 function hideLoader()  { const e=g('loader'); if(e) e.style.display='none'; }
 
@@ -125,7 +129,17 @@ function loadData() {
                 }
                 next();
             })
-            .catch(err => { clearTimeout(guard); hideLoader(); if(!allRows.length) showEmpty('❌ '+err.message); });
+            .catch(err => {
+                // 첫 파일(서울) 실패 시만 에러 표시, 나머지는 조용히 스킵 후 계속
+                if (!allRows.length && idx <= 1) {
+                    clearTimeout(guard);
+                    hideLoader();
+                    showEmpty('❌ ' + err.message);
+                } else {
+                    console.warn(`[스킵] ${file}: ${err.message}`);
+                    next(); // 다음 파일 계속 시도
+                }
+            });
     }
     next();
 
@@ -203,10 +217,24 @@ function getFiltered() {
 }
 
 // ═══ 셀렉트 초기화 (3단계)
+// sido 선택박스: TRADE_FILES 목록 기준으로 즉시 전체 채움
+// (데이터 로드 전에도 전국 sido가 보임)
 function initSelects() {
-    const sidos=[...new Set(allRows.map(d=>d.sido))].filter(Boolean).sort();
-    const sel=g('sido-select');
-    sidos.forEach(s=>{ if(![...sel.options].some(o=>o.value===s)){const o=document.createElement('option');o.value=s;o.textContent=s;sel.appendChild(o);} });
+    const sel = g('sido-select');
+    // TRADE_FILES에서 sido 추출 (중복 제거, 순서 유지)
+    const seen = new Set();
+    const sidoOrder = [];
+    TRADE_FILES.forEach(({sido}) => {
+        if (!seen.has(sido)) { seen.add(sido); sidoOrder.push(sido); }
+    });
+    // 가나다 정렬로 추가 (아직 없는 것만)
+    sidoOrder.sort().forEach(s => {
+        if (![...sel.options].some(o => o.value === s)) {
+            const o = document.createElement('option');
+            o.value = s; o.textContent = s;
+            sel.appendChild(o);
+        }
+    });
 }
 function updateGuOptions(sido) {
     const guSel=g('gu-select'), dSel=g('dong-select');
@@ -214,8 +242,16 @@ function updateGuOptions(sido) {
     dSel.innerHTML='<option value="all">전체 동</option>';
     guSel.disabled=sido==='all'; dSel.disabled=true;
     if (sido==='all') return;
-    [...new Set(allRows.filter(d=>d.sido===sido).map(d=>d.sg))].sort()
-        .forEach(gu=>{const o=document.createElement('option');o.value=gu;o.textContent=gu;guSel.appendChild(o);});
+
+    const gus = [...new Set(allRows.filter(d=>d.sido===sido).map(d=>d.sg))].sort();
+    if (!gus.length) {
+        // 해당 sido 데이터가 아직 로드 안 된 경우
+        const o=document.createElement('option');
+        o.value=''; o.textContent='(데이터 로드 중...)'; o.disabled=true;
+        guSel.appendChild(o);
+        return;
+    }
+    gus.forEach(gu=>{const o=document.createElement('option');o.value=gu;o.textContent=gu;guSel.appendChild(o);});
 }
 function updateDongOptions(sido, gu) {
     const dSel=g('dong-select');
