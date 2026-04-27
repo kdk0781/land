@@ -2,42 +2,40 @@ name: Daily Property Data Update
 
 on:
   schedule:
-    - cron: '0 18 * * *' # UTC 기준 18:00 (한국 시간 새벽 3시)
-  workflow_dispatch: # 수동 실행 버튼 활성화
+    - cron: '0 18 * * 1-5'  # UTC 18:00 (KST 03:00), 평일만
+  workflow_dispatch:          # 수동 실행 버튼
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: 저장소 체크아웃
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Python 설정
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          pip install requests pandas
+      - name: 의존성 설치
+        run: pip install requests pandas
 
-      - name: Run data fetch script
+      - name: 실거래 데이터 수집 (fetch_data.py)
         run: python fetch_data.py
 
-      - name: Commit and Push changes
+      - name: apt_trade_data.csv 커밋
         run: |
-          git config --global user.name "github-actions[bot]"
+          git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add apt_trade_data.csv
-          git commit -m "Update property data: $(date +'%Y-%m-%d')" || exit 0
+          git commit -m "데이터 업데이트: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
           git push
 
-      - name: CSV를 고속 JSON으로 변환
+      - name: CSV → JSON 변환 (update_all.py)
         run: python update_all.py
 
-      - name: 변경된 JSON 파일들 커밋 및 푸시
+      - name: JSON 파일 커밋 및 배포
         run: |
-          git config --global user.name "github-actions[bot]"
-          git add trade_*.json
-          git commit -m "Auto-sync: CSV data to optimized JSON" || echo "No changes"
+          git add trade_seoul.json trade_gyeonggi_a.json trade_gyeonggi_b.json trade_incheon.json
+          git commit -m "JSON 자동 갱신: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
           git push
