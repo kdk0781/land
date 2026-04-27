@@ -44,12 +44,12 @@ const BROKER = [
     {max:150000, rate:.006,cap:null},   {max:Infinity,rate:.007,cap:null},
 ];
 
-// ═══ 로드 파일 (운영 전환 시 주석 해제)
+// ═══ 로드 파일 (전국 — GitHub Actions로 자동 업데이트)
 const TRADE_FILES = [
     { file:'trade_seoul.json',      sido:'서울특별시', label:'서울' },
-    // { file:'trade_gyeonggi_a.json', sido:'경기도',    label:'경기(1/2)' },
-    // { file:'trade_gyeonggi_b.json', sido:'경기도',    label:'경기(2/2)' },
-    // { file:'trade_incheon.json',    sido:'인천광역시', label:'인천' },
+    { file:'trade_gyeonggi_a.json', sido:'경기도',    label:'경기(1/2)' },
+    { file:'trade_gyeonggi_b.json', sido:'경기도',    label:'경기(2/2)' },
+    { file:'trade_incheon.json',    sido:'인천광역시', label:'인천' },
 ];
 
 // ═══ 초기화
@@ -141,31 +141,31 @@ function loadData() {
 
 // ═══ KB 시세 조회 (3단계 엄격 매칭)
 // ──────────────────────────────────────────────────────
-// Level 1: sido+sgg+aptN+area (±2㎡) — 구까지 일치, 최고 신뢰도
-// Level 2: sido+aptN+area (±2㎡)     — 서울 내 유일한 구만 반환
-//          여러 구에 존재 → null (모호 → 시세없음이 오매칭보다 낫다)
+// Level 1: sido+sgg+aptN+area (±5㎡) — 구까지 일치, 최고 신뢰도
+// Level 2: sido+aptN+area (±5㎡)     — 유일한 구에만 존재할 때 반환
+//          여러 구 존재 → null (모호 → 시세없음이 오매칭보다 낫다)
 // 타 sido → 절대 반환 안 함 (타 지역 오매칭 완전 차단)
 // ──────────────────────────────────────────────────────
 function getKb(aptN, area, sido, sgg) {
     const ar = Math.round(parseFloat(area)||0);
 
-    // Level 1: 구까지 정밀 매칭 (±2㎡)
-    for (let d=0; d<=2; d++) for (const dt of (d===0?[0]:[d,-d])) {
+    // Level 1: sgg 정밀 매칭 (±5㎡)
+    for (let d=0; d<=5; d++) for (const dt of (d===0?[0]:[d,-d])) {
         const k = `${sido}||${sgg}||${aptN}||${ar+dt}`;
         if (kbMap[k]) return kbMap[k];
     }
 
-    // Level 2: 같은 sido, 같은 aptN+area, 단 하나의 구에만 존재할 때 (±2㎡)
-    for (let d=0; d<=2; d++) for (const dt of (d===0?[0]:[d,-d])) {
+    // Level 2: sido+aptN+area, 유일한 구일 때만 (±5㎡)
+    for (let d=0; d<=5; d++) for (const dt of (d===0?[0]:[d,-d])) {
         const k = `${sido}||${aptN}||${ar+dt}`;
         if (!kbMap[k] || !kbMap[k].length) continue;
         const entries = kbMap[k];
         const uniqSggs = new Set(entries.map(e=>e.sigungu));
-        if (uniqSggs.size === 1) return entries[0];  // 유일한 구 → 반환
-        break;  // 여러 구 → 모호, 이 delta로 중단
+        if (uniqSggs.size === 1) return entries[0];
+        break;  // 여러 구 → 모호, 중단
     }
 
-    return null;  // 매칭 실패 → 시세없음
+    return null;
 }
 
 function getKbRef(aptN, area, floor, sido, sgg) {
