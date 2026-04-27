@@ -193,6 +193,11 @@ body {
 .stats-wrap {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: var(--header-h, 0px);   /* 헤더 높이만큼 아래에서 sticky */
+    z-index: 40;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 .stats-filter-inner {
     max-width: 1400px;
@@ -292,6 +297,11 @@ body {
 .filter-wrap {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: var(--stats-top, 0px);  /* 헤더+통계 높이만큼 아래에서 sticky */
+    z-index: 39;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 .filter-inner {
     max-width: 1400px;
