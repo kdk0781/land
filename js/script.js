@@ -143,31 +143,44 @@ function loadData() {
     }
     next();
 
-    // KB 백그라운드 로드
-    fetch('kb.json')
-        .then(r => r.ok ? r.json() : null)
-        .then(json => {
-            if (!json) return;
-            const sgList = json.sg;
-            json.d.forEach(row => {
-                const [sg_i, aptN, area, low, mid, high] = row;
-                if (!aptN || !area || !mid) return;
-                const [sido, sgg] = sgList[sg_i];
-                const entry = { 하한가:low, 일반거래가:mid, 상한가:high, sido, sigungu:sgg };
-                // k1: 정밀키 (sido+sgg+aptN+area) → 1:1 (object)
-                const k1 = `${sido}||${sgg}||${aptN}||${area}`;
-                kbMap[k1] = entry;
-                // k2: 집계키 (sido+aptN+area) → 배열 (모호성 체크용)
-                const k2 = `${sido}||${aptN}||${area}`;
-                if (!kbMap[k2]) kbMap[k2] = [];
-                kbMap[k2].push(entry);
+    // ── KB 시세 로드 (Apt 사이트의 map.csv 직접 사용) ──────────
+    // 같은 도메인(kdk0781.github.io) → CORS 허용
+    // apt_norm 컬럼 이미 정규화됨 → 브라우저 정규화 불필요
+    const MAP_CSV_URL = 'https://kdk0781.github.io/Apt/execl/map.csv';
+    fetch(MAP_CSV_URL)
+        .then(r => r.ok ? r.text() : null)
+        .then(text => {
+            if (!text) return;
+            Papa.parse(text, {
+                header: true,
+                skipEmptyLines: true,
+                complete: results => {
+                    let cnt = 0;
+                    results.data.forEach(r => {
+                        const sido  = (r['sido']     || '').trim();
+                        const sgg   = (r['sigungu']  || '').trim();
+                        const aptN  = (r['apt_norm'] || '').trim(); // 이미 정규화
+                        const area  = Math.round(parseFloat(r['area'] || 0));
+                        const low   = parseInt(r['하한가']    || 0);
+                        const mid   = parseInt(r['일반거래가'] || 0);
+                        const high  = parseInt(r['상한가']    || 0);
+                        if (!aptN || !area || !mid) return;
+                        const entry = { 하한가:low, 일반거래가:mid, 상한가:high, sido, sigungu:sgg };
+                        // k1: sido+sgg+aptN+area (정밀 매칭)
+                        const k1 = `${sido}||${sgg}||${aptN}||${area}`;
+                        kbMap[k1] = entry;
+                        // k2: sido+aptN+area (폴백, 배열로 모호성 체크)
+                        const k2 = `${sido}||${aptN}||${area}`;
+                        if (!kbMap[k2]) kbMap[k2] = [];
+                        kbMap[k2].push(entry);
+                        cnt++;
+                    });
+                    const s = g('kb-status');
+                    if (s) { s.textContent=`KB ${cnt.toLocaleString()}건 ✓`; s.className='kb-status loaded'; }
+                }
             });
-            // KB 로드 건수 표시 (k2 키 수 = 실제 고유 아파트+면적 조합)
-            const cnt = json.d.length;
-            const s = g('kb-status');
-            if (s) { s.textContent=`KB ${cnt.toLocaleString()}건 ✓`; s.className='kb-status loaded'; }
         })
-        .catch(()=>{});
+        .catch(() => {});
 }
 
 // ═══ KB 시세 조회 (3단계 엄격 매칭)
