@@ -2,13 +2,16 @@ name: Daily Property Data Update
 
 on:
   schedule:
-    - cron: '0 18 * * 1-5'  # UTC 18:00 = KST 03:00, 평일만
-  workflow_dispatch:          # 수동 실행 버튼
+    - cron: '0 18 * * 1-5'   # UTC 18:00 = KST 03:00, 평일
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30       # 최대 30분 (초과 시 자동 종료)
+    timeout-minutes: 30        # 전체 job 최대 30분
+
+    env:
+      PYTHONUNBUFFERED: "1"    # Python 출력 즉시 표시 (버퍼링 방지)
 
     steps:
       - name: 저장소 체크아웃
@@ -22,9 +25,9 @@ jobs:
       - name: 의존성 설치
         run: pip install requests pandas
 
-      # ── Step 1: 전국 실거래 데이터 수집 ──────────────────────
+      # ── Step 1: 전국 실거래 수집 ─────────────────────────────
       - name: 전국 실거래 데이터 수집 (fetch_data.py)
-        timeout-minutes: 15   # 이 단계만 최대 15분
+        timeout-minutes: 20
         run: python fetch_data.py
 
       # ── Step 2: CSV 커밋 ──────────────────────────────────────
@@ -38,7 +41,7 @@ jobs:
 
       # ── Step 3: CSV → JSON 변환 ───────────────────────────────
       - name: CSV → JSON 변환 (update_all.py)
-        timeout-minutes: 5    # 이 단계는 2분 이내 완료
+        timeout-minutes: 5
         run: python update_all.py
 
       # ── Step 4: 전국 JSON 커밋 ───────────────────────────────
