@@ -11,14 +11,8 @@ let filteredRows  = [];
 let renderedCount = 0;
 const PAGE_SIZE   = 30;
 
-// kbMap 두 종류의 키 사용:
-//   k1: "sido||sgg||aptN||area"  → entry (object, 1:1)
-//   k2: "sido||aptN||area"       → [entry, ...] (배열, 모호성 체크용)
-let kbMap = {};
-
 let currentMode      = 'latest';
 let currentRegStatus = '비규제지역';
-let currentKbPrice   = 0;
 let filterFrom       = 0;
 let filterTo         = 0;
 
@@ -44,21 +38,18 @@ const BROKER = [
     {max:150000, rate:.006,cap:null},   {max:Infinity,rate:.007,cap:null},
 ];
 
-// ═══ 로드 파일 (전국 — GitHub Actions로 자동 업데이트)
+// ═══ 로드 파일 (운영 전환 시 주석 해제)
 const TRADE_FILES = [
-    // 수도권 먼저 → 첫 화면 빠르게 표시
     { file:'trade_seoul.json',      sido:'서울특별시',    label:'서울' },
     { file:'trade_gyeonggi_a.json', sido:'경기도',        label:'경기(1/2)' },
     { file:'trade_gyeonggi_b.json', sido:'경기도',        label:'경기(2/2)' },
     { file:'trade_incheon.json',    sido:'인천광역시',    label:'인천' },
-    // 5대 광역시
     { file:'trade_busan.json',      sido:'부산광역시',    label:'부산' },
     { file:'trade_daegu.json',      sido:'대구광역시',    label:'대구' },
     { file:'trade_gwangju.json',    sido:'광주광역시',    label:'광주' },
     { file:'trade_daejeon.json',    sido:'대전광역시',    label:'대전' },
     { file:'trade_ulsan.json',      sido:'울산광역시',    label:'울산' },
     { file:'trade_sejong.json',     sido:'세종특별자치시',label:'세종' },
-    // 도 단위
     { file:'trade_gangwon.json',    sido:'강원특별자치도',label:'강원' },
     { file:'trade_chungbuk.json',   sido:'충청북도',      label:'충북' },
     { file:'trade_chungnam.json',   sido:'충청남도',      label:'충남' },
@@ -70,15 +61,14 @@ const TRADE_FILES = [
 ];
 
 // ═══ Sticky 오프셋 동적 계산
-// 헤더→통계배너→필터 순서로 각 높이를 CSS 변수에 주입
 function updateStickyOffsets() {
     const header = document.querySelector('.app-header');
     const stats  = document.querySelector('.stats-wrap');
     if (!header || !stats) return;
-    const headerH = header.getBoundingClientRect().height;
-    const statsH  = stats.getBoundingClientRect().height;
-    document.documentElement.style.setProperty('--header-h', headerH + 'px');
-    document.documentElement.style.setProperty('--stats-top', (headerH + statsH) + 'px');
+    const hh = header.getBoundingClientRect().height;
+    const sh = stats.getBoundingClientRect().height;
+    document.documentElement.style.setProperty('--header-h', hh + 'px');
+    document.documentElement.style.setProperty('--stats-top', (hh + sh) + 'px');
 }
 
 // ═══ 초기화
@@ -86,11 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initSelects();
     setupEvents();
     loadData();
-    // DOM 렌더 후 sticky 오프셋 계산
     requestAnimationFrame(updateStickyOffsets);
-    // 리사이즈 시 재계산 (탭 전환 등으로 높이 변할 수 있음)
-    window.addEventListener('resize', updateStickyOffsets, { passive: true });
+    window.addEventListener('resize', updateStickyOffsets, { passive:true });
 });
+
 function setLoader(t) { const e=document.querySelector('.loader-text'); if(e) e.textContent=t; }
 function hideLoader()  { const e=g('loader'); if(e) e.style.display='none'; }
 
@@ -115,9 +104,8 @@ function loadData() {
                 if (!APT.length)  APT  = json.apt;
                 if (!APTN.length) APTN = json.aptN;
                 setLoader(`${label} 데이터 처리 중...`);
-                // d: [sg_i, dong_i, apt_i, aptN_i, area×10, floor, ym, day, price, jPrice, gap, jRatio×10]
                 const rows = json.d.map(r => {
-                    const sg=json.sg[r[0]], dong=json.dong[r[1]], apt=json.apt[r[2]], aptN=json.aptN[r[3]];
+                    const sg=json.sg[r[0]], dong=json.dong[r[1]], apt=json.apt[r[2]];
                     const area=r[4]/10, floor=r[5], ym=r[6], day=r[7];
                     const price=r[8], jPrice=r[9], gap=r[10], jRatio=r[11]/10;
                     const pyung=area/3.3058;
@@ -126,7 +114,7 @@ function loadData() {
                         gudong:`${sg} ${dong}`.trim(),
                         areaRound:Math.round(area),
                         regStatus:getRegStatus(sido,sg,dong),
-                        apt, aptN, area, floor, ym, day,
+                        apt, area, floor, ym, day,
                         price, jPrice, gap, jRatio,
                         pyung:pyung.toFixed(1),
                         pyungPrice:pyung>0?Math.round(price/pyung):0,
@@ -146,92 +134,11 @@ function loadData() {
                 next();
             })
             .catch(err => {
-                // 첫 파일(서울) 실패 시만 에러 표시, 나머지는 조용히 스킵 후 계속
-                if (!allRows.length && idx <= 1) {
-                    clearTimeout(guard);
-                    hideLoader();
-                    showEmpty('❌ ' + err.message);
-                } else {
-                    console.warn(`[스킵] ${file}: ${err.message}`);
-                    next(); // 다음 파일 계속 시도
-                }
+                if (!allRows.length && idx<=1) { clearTimeout(guard); hideLoader(); showEmpty('❌ '+err.message); }
+                else { console.warn(`[스킵] ${file}: ${err.message}`); next(); }
             });
     }
     next();
-
-    // ── KB 시세 로드 (Apt 사이트의 map.csv 직접 사용) ──────────
-    // 같은 도메인(kdk0781.github.io) → CORS 허용
-    // apt_norm 컬럼 이미 정규화됨 → 브라우저 정규화 불필요
-    const MAP_CSV_URL = 'https://kdk0781.github.io/Apt/execl/map.csv';
-    fetch(MAP_CSV_URL)
-        .then(r => r.ok ? r.text() : null)
-        .then(text => {
-            if (!text) return;
-            Papa.parse(text, {
-                header: true,
-                skipEmptyLines: true,
-                complete: results => {
-                    let cnt = 0;
-                    results.data.forEach(r => {
-                        const sido  = (r['sido']     || '').trim();
-                        const sgg   = (r['sigungu']  || '').trim();
-                        const aptN  = (r['apt_norm'] || '').trim(); // 이미 정규화
-                        const area  = Math.round(parseFloat(r['area'] || 0));
-                        const low   = parseInt(r['하한가']    || 0);
-                        const mid   = parseInt(r['일반거래가'] || 0);
-                        const high  = parseInt(r['상한가']    || 0);
-                        if (!aptN || !area || !mid) return;
-                        const entry = { 하한가:low, 일반거래가:mid, 상한가:high, sido, sigungu:sgg };
-                        // k1: sido+sgg+aptN+area (정밀 매칭)
-                        const k1 = `${sido}||${sgg}||${aptN}||${area}`;
-                        kbMap[k1] = entry;
-                        // k2: sido+aptN+area (폴백, 배열로 모호성 체크)
-                        const k2 = `${sido}||${aptN}||${area}`;
-                        if (!kbMap[k2]) kbMap[k2] = [];
-                        kbMap[k2].push(entry);
-                        cnt++;
-                    });
-                    const s = g('kb-status');
-                    if (s) { s.textContent=`KB ${cnt.toLocaleString()}건 ✓`; s.className='kb-status loaded'; }
-                }
-            });
-        })
-        .catch(() => {});
-}
-
-// ═══ KB 시세 조회 (3단계 엄격 매칭)
-// ──────────────────────────────────────────────────────
-// Level 1: sido+sgg+aptN+area (±5㎡) — 구까지 일치, 최고 신뢰도
-// Level 2: sido+aptN+area (±5㎡)     — 유일한 구에만 존재할 때 반환
-//          여러 구 존재 → null (모호 → 시세없음이 오매칭보다 낫다)
-// 타 sido → 절대 반환 안 함 (타 지역 오매칭 완전 차단)
-// ──────────────────────────────────────────────────────
-function getKb(aptN, area, sido, sgg) {
-    const ar = Math.round(parseFloat(area)||0);
-
-    // Level 1: sgg 정밀 매칭 (±5㎡)
-    for (let d=0; d<=5; d++) for (const dt of (d===0?[0]:[d,-d])) {
-        const k = `${sido}||${sgg}||${aptN}||${ar+dt}`;
-        if (kbMap[k]) return kbMap[k];
-    }
-
-    // Level 2: sido+aptN+area, 유일한 구일 때만 (±5㎡)
-    for (let d=0; d<=5; d++) for (const dt of (d===0?[0]:[d,-d])) {
-        const k = `${sido}||${aptN}||${ar+dt}`;
-        if (!kbMap[k] || !kbMap[k].length) continue;
-        const entries = kbMap[k];
-        const uniqSggs = new Set(entries.map(e=>e.sigungu));
-        if (uniqSggs.size === 1) return entries[0];
-        break;  // 여러 구 → 모호, 중단
-    }
-
-    return null;
-}
-
-function getKbRef(aptN, area, floor, sido, sgg) {
-    const kb=getKb(aptN,area,sido,sgg);
-    if (!kb) return 0;
-    return parseInt(floor)===1 ? kb.하한가 : kb.일반거래가;
 }
 
 // ═══ 날짜 필터
@@ -246,22 +153,13 @@ function getFiltered() {
 }
 
 // ═══ 셀렉트 초기화 (3단계)
-// sido 선택박스: TRADE_FILES 목록 기준으로 즉시 전체 채움
-// (데이터 로드 전에도 전국 sido가 보임)
 function initSelects() {
-    const sel = g('sido-select');
-    // TRADE_FILES에서 sido 추출 (중복 제거, 순서 유지)
-    const seen = new Set();
-    const sidoOrder = [];
-    TRADE_FILES.forEach(({sido}) => {
-        if (!seen.has(sido)) { seen.add(sido); sidoOrder.push(sido); }
-    });
-    // 가나다 정렬로 추가 (아직 없는 것만)
+    const seen=new Set(), sidoOrder=[];
+    TRADE_FILES.forEach(({sido}) => { if(!seen.has(sido)){seen.add(sido);sidoOrder.push(sido);} });
+    const sel=g('sido-select');
     sidoOrder.sort().forEach(s => {
-        if (![...sel.options].some(o => o.value === s)) {
-            const o = document.createElement('option');
-            o.value = s; o.textContent = s;
-            sel.appendChild(o);
+        if(![...sel.options].some(o=>o.value===s)){
+            const o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o);
         }
     });
 }
@@ -271,25 +169,20 @@ function updateGuOptions(sido) {
     dSel.innerHTML='<option value="all">전체 동</option>';
     guSel.disabled=sido==='all'; dSel.disabled=true;
     if (sido==='all') return;
-
-    const gus = [...new Set(allRows.filter(d=>d.sido===sido).map(d=>d.sg))].sort();
+    const gus=[...new Set(allRows.filter(d=>d.sido===sido).map(d=>d.sg))].sort();
     if (!gus.length) {
-        // 해당 sido 데이터가 아직 로드 안 된 경우
-        const o=document.createElement('option');
-        o.value=''; o.textContent='(데이터 로드 중...)'; o.disabled=true;
-        guSel.appendChild(o);
-        return;
+        const o=document.createElement('option'); o.value=''; o.textContent='(로드 중...)'; o.disabled=true;
+        guSel.appendChild(o); return;
     }
     gus.forEach(gu=>{const o=document.createElement('option');o.value=gu;o.textContent=gu;guSel.appendChild(o);});
 }
-function updateDongOptions(sido, gu) {
+function updateDongOptions(sido,gu) {
     const dSel=g('dong-select');
     dSel.innerHTML='<option value="all">전체 동</option>'; dSel.disabled=gu==='all';
     if (gu==='all') return;
     [...new Set(allRows.filter(d=>d.sido===sido&&d.sg===gu).map(d=>d.dong))].sort()
         .forEach(dong=>{const o=document.createElement('option');o.value=dong;o.textContent=dong;dSel.appendChild(o);});
 }
-
 function updateStats(rows) {
     const p=(rows||allRows).map(d=>d.price).filter(Boolean);
     if(!p.length){['stat-avg','stat-med','stat-max'].forEach(id=>{const e=g(id);if(e)e.textContent='—';});return;}
@@ -297,6 +190,44 @@ function updateStats(rows) {
     g('stat-avg').textContent=f억(p.reduce((a,b)=>a+b,0)/p.length);
     g('stat-med').textContent=f억(s[Math.floor(s.length/2)]);
     g('stat-max').textContent=f억(s[s.length-1]);
+}
+
+// ═══ 이벤트
+function setupEvents() {
+    g('sido-select').addEventListener('change',function(){updateGuOptions(this.value);applyFilter();});
+    g('gu-select').addEventListener('change',function(){updateDongOptions(g('sido-select').value,this.value);applyFilter();});
+    g('dong-select').addEventListener('change',applyFilter);
+    g('search-input').addEventListener('input',debounce(applyFilter,200));
+    g('date-from').addEventListener('change',applyDate);
+    g('date-to').addEventListener('change',applyDate);
+    document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',function(){
+        document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active'));
+        this.classList.add('active'); currentMode=this.dataset.mode; applyFilter();
+    }));
+    document.querySelectorAll('.modal-tab').forEach(t=>t.addEventListener('click',function(){
+        document.querySelectorAll('.modal-tab').forEach(x=>x.classList.remove('active'));
+        this.classList.add('active');
+        document.querySelectorAll('.modal-panel').forEach(p=>p.classList.add('hidden'));
+        g('panel-'+this.dataset.tab).classList.remove('hidden'); recalc();
+    }));
+    ['calc-income','calc-base-rate','calc-stress','calc-first-home','calc-house-count'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el){el.addEventListener('input',recalc);el.addEventListener('change',recalc);}
+    });
+    g('dsr-modal').addEventListener('click',ev=>{if(ev.target===g('dsr-modal'))closeModal('dsr-modal');});
+    g('history-modal').addEventListener('click',ev=>{if(ev.target===g('history-modal'))closeModal('history-modal');});
+}
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+function applyDate() {
+    const from=g('date-from').value, to=g('date-to').value, errEl=g('date-error');
+    filterFrom=from?parseInt(from.replace('-','')+'01'):0;
+    filterTo=to?parseInt(to.replace('-','')+'31'):0;
+    if(from&&to){
+        const diff=(new Date(to+'-01')-new Date(from+'-01'))/86400000;
+        if(diff<0){if(errEl)errEl.textContent='종료일이 시작일보다 빠릅니다.';return;}
+        if(diff>366){if(errEl)errEl.textContent='최대 1년 이내로 설정하세요.';return;}
+    }
+    if(errEl)errEl.textContent=''; applyFilter();
 }
 
 // ═══ 필터 & 정렬
@@ -308,27 +239,16 @@ function applyFilter() {
         (dong==='all'||d.dong===dong)&&(search===''||d.apt.toLowerCase().includes(search))
     );
 
-    if(currentMode==='latest')        { rows.sort((a,b)=>(b.ym*100+b.day)-(a.ym*100+a.day)); filteredRows=rows; }
-    else if(currentMode==='top_price'){ rows.sort((a,b)=>b.price-a.price); filteredRows=rows; }
-    else if(currentMode==='volume')   {
+    if(currentMode==='latest')         { rows.sort((a,b)=>(b.ym*100+b.day)-(a.ym*100+a.day)); filteredRows=rows; }
+    else if(currentMode==='top_price') { rows.sort((a,b)=>b.price-a.price); filteredRows=rows; }
+    else if(currentMode==='volume')    {
         const grp={};
-        rows.forEach(d=>{const k=`${d.sido}||${d.gudong}||${d.apt}`;if(!grp[k])grp[k]={...d,count:0,maxP:0,minP:Infinity};grp[k].count++;if(d.price>grp[k].maxP)grp[k].maxP=d.price;if(d.price<grp[k].minP)grp[k].minP=d.price;});
+        rows.forEach(d=>{const k=`${d.sido}||${d.gudong}||${d.apt}`;
+            if(!grp[k])grp[k]={...d,count:0,maxP:0,minP:Infinity};
+            grp[k].count++;if(d.price>grp[k].maxP)grp[k].maxP=d.price;if(d.price<grp[k].minP)grp[k].minP=d.price;});
         filteredRows=Object.values(grp).sort((a,b)=>b.count-a.count);
     }
-    else if(currentMode==='gap_invest'){ filteredRows=rows.filter(d=>d.jRatio>0).sort((a,b)=>b.jRatio-a.jRatio); }
-    else if(currentMode==='compare')   {
-        const grp={};
-        rows.forEach(d=>{
-            const kb=getKb(d.aptN,d.areaRound,d.sido,d.sg); if(!kb) return;
-            const k=`${d.aptN}||${d.areaRound}`;
-            if(!grp[k]||d.price>grp[k].price) grp[k]={...d,kb};
-        });
-        filteredRows=Object.values(grp).map(d=>{
-            const ref=parseInt(d.floor)===1?d.kb.하한가:d.kb.일반거래가;
-            const diff=d.price-ref;
-            return{...d,kbRef:ref,diff,diffPct:ref>0?diff/ref*100:0};
-        }).sort((a,b)=>Math.abs(b.diffPct)-Math.abs(a.diffPct));
-    }
+    else if(currentMode==='gap_invest') { filteredRows=rows.filter(d=>d.jRatio>0).sort((a,b)=>b.jRatio-a.jRatio); }
 
     updateStats(filteredRows);
     renderedCount=0;
@@ -357,48 +277,12 @@ const ioObs=new IntersectionObserver(entries=>{if(entries[0].isIntersecting&&ren
 const muObs=new MutationObserver(()=>{const s=document.getElementById('scroll-sentinel');if(s)ioObs.observe(s);});
 document.addEventListener('DOMContentLoaded',()=>{const g2=g('card-grid');if(g2)muObs.observe(g2,{childList:true});});
 
-// ═══ 이벤트
-function setupEvents() {
-    g('sido-select').addEventListener('change',function(){updateGuOptions(this.value);applyFilter();});
-    g('gu-select').addEventListener('change',function(){updateDongOptions(g('sido-select').value,this.value);applyFilter();});
-    g('dong-select').addEventListener('change',applyFilter);
-    g('search-input').addEventListener('input',debounce(applyFilter,200));
-    g('date-from').addEventListener('change',applyDate);
-    g('date-to').addEventListener('change',applyDate);
-    document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',function(){
-        document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active'));
-        this.classList.add('active');currentMode=this.dataset.mode;applyFilter();
-    }));
-    document.querySelectorAll('.modal-tab').forEach(t=>t.addEventListener('click',function(){
-        document.querySelectorAll('.modal-tab').forEach(x=>x.classList.remove('active'));
-        this.classList.add('active');
-        document.querySelectorAll('.modal-panel').forEach(p=>p.classList.add('hidden'));
-        g('panel-'+this.dataset.tab).classList.remove('hidden');recalc();
-    }));
-    ['calc-income','calc-base-rate','calc-stress','calc-first-home','calc-house-count'].forEach(id=>{
-        const el=document.getElementById(id);
-        if(el){el.addEventListener('input',recalc);el.addEventListener('change',recalc);}
-    });
-    g('dsr-modal').addEventListener('click',ev=>{if(ev.target===g('dsr-modal'))closeModal('dsr-modal');});
-    g('history-modal').addEventListener('click',ev=>{if(ev.target===g('history-modal'))closeModal('history-modal');});
-}
-function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
-function applyDate(){
-    const from=g('date-from').value,to=g('date-to').value,errEl=g('date-error');
-    filterFrom=from?parseInt(from.replace('-','')+'01'):0;
-    filterTo=to?parseInt(to.replace('-','')+'31'):0;
-    if(from&&to){const diff=(new Date(to+'-01')-new Date(from+'-01'))/86400000;
-        if(diff<0){if(errEl)errEl.textContent='종료일이 시작일보다 빠릅니다.';return;}
-        if(diff>366){if(errEl)errEl.textContent='최대 1년 이내로 설정하세요.';return;}}
-    if(errEl)errEl.textContent='';applyFilter();}
-
 // ═══ 카드
-function buildCard(d,idx){return({volume:cardVolume,gap_invest:cardGap,compare:cardCompare}[currentMode]||cardTrade)(d,idx);}
+function buildCard(d,idx){return({volume:cardVolume,gap_invest:cardGap}[currentMode]||cardTrade)(d,idx);}
 function regBadge(s){return s==='투기과열지구'?`<span class="badge badge-reg">🔴 투기과열</span>`:`<span class="badge badge-free">🟢 비규제</span>`;}
 function fmtDate(ym,day){const y=String(ym),m=y.slice(4);return `${y.slice(0,4)}년 ${parseInt(m)}월 ${parseInt(day)}일`;}
 
-function cardTrade(d){
-    const kr=getKbRef(d.aptN,d.areaRound,d.floor,d.sido,d.sg);
+function cardTrade(d) {
     return `<div class="card" onclick="openHistory('${e(d.apt)}','${e(d.sido)}','${e(d.gudong)}')">
   <div class="badge-row"><span class="badge badge-region">${d.sg} ${d.dong}</span>${regBadge(d.regStatus)}</div>
   <div class="card-name">${d.apt}</div>
@@ -406,22 +290,21 @@ function cardTrade(d){
   <div class="card-date-row">📅 ${fmtDate(d.ym,d.day)}</div>
   <div class="card-bottom">
     <div><div class="price-main">${f억(d.price)}</div><div class="price-sub">평당 ${d.pyungPrice.toLocaleString()}만</div></div>
-    <button class="loan-btn" onclick="event.stopPropagation();openM('${e(d.apt)}',${d.price},${kr},'${d.regStatus}','${d.floor}')">💰 대출 계산</button>
+    <button class="loan-btn" onclick="event.stopPropagation();openM('${e(d.apt)}',${d.price},'${d.regStatus}','${d.floor}')">💰 대출 계산</button>
   </div>
 </div>`;}
 
-function cardVolume(d,idx){
-    const kr=getKbRef(d.aptN,d.areaRound,'2',d.sido,d.sg);
+function cardVolume(d,idx) {
     return `<div class="card card-rank ${idx<3?'top':''}" onclick="openHistory('${e(d.apt)}','${e(d.sido)}','${e(d.gudong)}')">
   <div class="badge-row"><span class="rank-label">${idx+1}위</span><span class="vol-badge">${d.count}건</span></div>
   <div class="card-name">${d.apt}</div><div class="card-meta">${d.sg} ${d.dong}</div>
   <div class="card-bottom">
     <div><div class="price-sub">최고 <b style="color:var(--red)">${f억(d.maxP)}</b></div><div class="price-sub">최저 <b style="color:var(--blue)">${f억(d.minP)}</b></div></div>
-    <button class="loan-btn" onclick="event.stopPropagation();openM('${e(d.apt)}',${d.maxP},${kr},'${d.regStatus}','2')">💰 대출 계산</button>
+    <button class="loan-btn" onclick="event.stopPropagation();openM('${e(d.apt)}',${d.maxP},'${d.regStatus}','2')">💰 대출 계산</button>
   </div>
 </div>`;}
 
-function cardGap(d,idx){
+function cardGap(d,idx) {
     return `<div class="card" onclick="openHistory('${e(d.apt)}','${e(d.sido)}','${e(d.gudong)}')">
   <div style="position:absolute;top:0;right:0;background:var(--green);color:#fff;font-size:.58rem;font-weight:900;padding:.25rem .6rem;border-bottom-left-radius:.5rem">전세가율 ${d.jRatio.toFixed(1)}%</div>
   <div class="badge-row" style="margin-top:.2rem"><span class="badge badge-region">${d.sg} ${d.dong}</span>${regBadge(d.regStatus)}</div>
@@ -436,116 +319,76 @@ function cardGap(d,idx){
   </div>
 </div>`;}
 
-function cardCompare(d,idx){
-    const kb=d.kb,ref=d.kbRef,isUp=d.diff>0,pct=Math.abs(d.diffPct).toFixed(1);
-    const fill=Math.min(100,d.price/Math.max(d.price,kb.상한가)*100);
-    const lbl=parseInt(d.floor)===1?'KB하한(1층)':'KB일반';
-    return `<div class="card" onclick="openHistory('${e(d.apt)}','${e(d.sido)}','${e(d.gudong)}')">
-  <div class="badge-row"><span class="badge badge-region">${d.sg} ${d.dong}</span>${regBadge(d.regStatus)}<span class="diff-badge ${isUp?'over':'under'}" style="margin-left:auto">${isUp?'▲':'▼'}${pct}%</span></div>
-  <div class="card-name">${d.apt}</div>
-  <div class="card-meta">${d.area}㎡ · ${d.pyung}평 · ${d.floor}층${parseInt(d.floor)===1?' · 1층→하한가':''}</div>
-  <div class="compare-grid">
-    <div class="cmp-cell"><div class="cmp-label">실거래가</div><div class="cmp-value ${isUp?'up':'down'}">${f억(d.price)}</div></div>
-    <div class="cmp-cell"><div class="cmp-label">${lbl}</div><div class="cmp-value">${f억(ref)}</div></div>
-    <div class="cmp-cell"><div class="cmp-label">KB 하한가</div><div class="cmp-value" style="color:var(--text2)">${f억(kb.하한가)}</div></div>
-    <div class="cmp-cell"><div class="cmp-label">KB 상한가</div><div class="cmp-value" style="color:var(--text2)">${f억(kb.상한가)}</div></div>
-  </div>
-  <div class="trend-bar"><div class="trend-fill" style="width:${fill}%;background:var(${isUp?'--red':'--green'})"></div></div>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:.35rem">
-    <span style="font-size:.58rem;color:var(--text3)">하한 ${f억(kb.하한가)}</span>
-    <span style="font-size:.62rem;font-weight:800;color:var(${isUp?'--red':'--green'})">${isUp?'▲':'▼'}${pct}% 실거래 ${isUp?'높음':'낮음'}</span>
-    <span style="font-size:.58rem;color:var(--text3)">상한 ${f억(kb.상한가)}</span>
-  </div>
-  <div style="text-align:right;margin-top:.625rem">
-    <button class="loan-btn" onclick="event.stopPropagation();openM('${e(d.apt)}',${d.price},${ref},'${d.regStatus}','${d.floor}')">💰 대출 계산</button>
-  </div>
-</div>`;}
-
 // ═══ 거래이력 모달
-function openHistory(apt,sido,gudong){
+function openHistory(apt,sido,gudong) {
     const list=allRows.filter(d=>d.apt===apt&&d.sido===sido&&d.gudong===gudong)
         .sort((a,b)=>(b.ym*100+b.day)-(a.ym*100+a.day));
     g('history-apt-name').textContent=apt;
     g('history-region').textContent=`${sido} ${gudong}`;
-    const sg=list.length?list[0].sg:'';
-    const kb=list.length?getKb(list[0].aptN,list[0].areaRound,sido,sg):null;
-    const kbLine=kb
-        ?`<div style="background:var(--surface3);border:1px solid var(--border);border-radius:.5rem;padding:.6rem .875rem;margin-bottom:.75rem;font-size:.72rem;font-weight:700;color:var(--text2)">
-            KB 하한 <b style="color:var(--text1)">${f억(kb.하한가)}</b> &nbsp;·&nbsp;
-            일반 <b style="color:var(--blue)">${f억(kb.일반거래가)}</b> &nbsp;·&nbsp;
-            상한 <b style="color:var(--text1)">${f억(kb.상한가)}</b></div>`
-        :`<div style="background:var(--surface3);border:1px solid var(--border);border-radius:.5rem;padding:.5rem .875rem;margin-bottom:.75rem;font-size:.72rem;color:var(--text3)">KB 시세 없음</div>`;
     const maxP=list.length?Math.max(...list.map(d=>d.price)):0;
-    const body=list.map(d=>`<div class="history-item">
+    const body=list.map(d=>{
+        const ym=String(d.ym), dt=`${ym.slice(0,4)}.${ym.slice(4)}.${String(d.day).padStart(2,'0')}`;
+        return `<div class="history-item">
   <div class="history-date-full">${fmtDate(d.ym,d.day)}</div>
   <div style="display:flex;gap:.4rem"><span class="history-area">${d.area}㎡</span><span class="history-floor">${d.floor}층</span></div>
   <div style="text-align:right;flex:1">
     <div class="history-price" style="${d.price===maxP?'color:var(--red)':''}">${f억(d.price)}</div>
     <div class="history-pyung">평당 ${d.pyungPrice.toLocaleString()}만</div>
   </div>
-</div>`).join('')||'<p style="text-align:center;color:var(--text3);padding:2rem;font-size:.8rem">거래 내역이 없습니다</p>';
-    g('history-list').innerHTML=kbLine+body;
-    openModal('history-modal');}
+</div>`;}).join('')||'<p style="text-align:center;color:var(--text3);padding:2rem;font-size:.8rem">거래 내역이 없습니다</p>';
+    g('history-list').innerHTML=body;
+    openModal('history-modal');
+}
 
-// ═══ 대출 모달
-function openM(apt,tradePrice,kbPrice,regStatus,floor){
-    currentRegStatus=regStatus;currentKbPrice=kbPrice||0;
+// ═══ 대출/세금 모달
+function openM(apt, price, regStatus, floor) {
+    currentRegStatus=regStatus;
     g('modal-apt-name').textContent=apt;
     const isSpec=regStatus==='투기과열지구';
     const badge=g('modal-reg-badge');
     badge.textContent=isSpec?'투기과열지구 · LTV 40%':'비규제지역 · LTV 70%';
     badge.className=`reg-badge-modal ${isSpec?'regulated':'free'}`;
-    g('pcb-kb-label').textContent=parseInt(floor)===1?'KB 하한가 (1층)':'KB 일반거래가';
-    g('pcb-trade').textContent=f억(tradePrice);
-    const kve=g('pcb-kb');kve.textContent=currentKbPrice>0?f억(currentKbPrice):'시세없음';kve.style.color=currentKbPrice>0?'':'var(--text3)';
-    const tc=g('pcb-cell-trade'),kc=g('pcb-cell-kb');
-    tc.classList.remove('active-ltv');kc.classList.remove('active-ltv');
-    if(currentKbPrice>0){(tradePrice<=currentKbPrice?tc:kc).classList.add('active-ltv');g('pcb-tag').style.display='';}
-    else g('pcb-tag').style.display='none';
-    g('calc-price').value=tradePrice;g('calc-kb-price').value=currentKbPrice||tradePrice;
+    g('calc-price').value=price;
     document.querySelectorAll('.modal-tab').forEach(t=>t.classList.remove('active'));
     document.querySelectorAll('.modal-panel').forEach(p=>p.classList.add('hidden'));
     document.querySelector('.modal-tab[data-tab="loan"]').classList.add('active');
     g('panel-loan').classList.remove('hidden');
-    openModal('dsr-modal');recalc();}
-
-function recalc(){calcLoan();calcTax();calcFee();}
-function calcLoan(){
-    const income=parseFloat(g('calc-income').value)||0,base=parseFloat(g('calc-base-rate').value)||0;
-    const stress=parseFloat(g('calc-stress').value)||0,tP=parseFloat(g('calc-price').value)||0;
-    const kP=parseFloat(g('calc-kb-price').value)||0,first=g('calc-first-home').checked;
-    const evalBase=kP>0?Math.min(tP,kP):tP,rate=(base+stress)/100;
-    const ltv=first?0.7:currentRegStatus==='투기과열지구'?0.4:0.7;
-    const n=360,r=rate/12,factor=r===0?1/n:r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1);
-    const loan=Math.min(evalBase*ltv,(income*.4)/(factor*12),tP>250000?20000:tP>150000?40000:60000);
-    g('calc-result').textContent=fW(loan);g('calc-cash').textContent='필요 자본금: '+fW(tP-loan);
-    const note=g('calc-base-note');
-    if(kP>0&&kP<tP){note.textContent=`⚠ KB시세(${f억(kP)}) 기준 LTV 적용`;note.style.color='var(--amber)';}
-    else if(kP>0){note.textContent=`✓ 실거래가(${f억(tP)}) 기준 LTV 적용`;note.style.color='var(--green)';}
-    else{note.textContent='KB 시세 없음 — 실거래가 기준 적용';note.style.color='var(--text3)';}
+    openModal('dsr-modal'); recalc();
 }
-function calcTax(){
-    const price=parseFloat(g('calc-price').value)||0,first=g('calc-first-home').checked;
+function recalc(){calcLoan();calcTax();calcFee();}
+
+function calcLoan() {
+    const income=parseFloat(g('calc-income').value)||0, base=parseFloat(g('calc-base-rate').value)||0;
+    const stress=parseFloat(g('calc-stress').value)||0, tP=parseFloat(g('calc-price').value)||0;
+    const first=g('calc-first-home').checked;
+    const rate=(base+stress)/100, ltv=first?0.7:currentRegStatus==='투기과열지구'?0.4:0.7;
+    const n=360, r=rate/12, factor=r===0?1/n:r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1);
+    const loan=Math.min(tP*ltv,(income*.4)/(factor*12),tP>250000?20000:tP>150000?40000:60000);
+    g('calc-result').textContent=fW(loan);
+    g('calc-cash').textContent='필요 자본금: '+fW(tP-loan);
+}
+function calcTax() {
+    const price=parseFloat(g('calc-price').value)||0, first=g('calc-first-home').checked;
     const hc=parseInt(document.getElementById('calc-house-count')?.value||1);
-    const isReg=currentRegStatus.includes('투기'),pw=price*10000;
+    const isReg=currentRegStatus.includes('투기'), pw=price*10000;
     let rate;
     if(first)rate=.01;else if(hc===1)rate=price<=6000?.01:price<=90000?.02:.03;
     else if(hc===2)rate=isReg?.08:.01;else rate=isReg?.12:.08;
     const acq=Math.floor(pw*rate),edu=Math.floor(acq*.1),spec=rate>=.02?Math.floor(pw*.002):0;
     const disc=first?Math.min(acq,2000000):0;
-    g('tax-acquisition').textContent=fM(acq);g('tax-edu').textContent=fM(edu);
-    g('tax-special').textContent=fM(spec);g('tax-discount').textContent=disc>0?'-'+fM(disc):'-';
+    g('tax-acquisition').textContent=fM(acq); g('tax-edu').textContent=fM(edu);
+    g('tax-special').textContent=fM(spec); g('tax-discount').textContent=disc>0?'-'+fM(disc):'-';
     g('tax-total').textContent=fM(acq+edu+spec-disc);
     g('tax-rate-note').textContent=`적용 취득세율: ${(rate*100).toFixed(0)}%`;
 }
-function calcFee(){
+function calcFee() {
     const price=parseFloat(g('calc-price').value)||0;
     let rate=.007,cap=null;
     for(const t of BROKER){if(price<=t.max){rate=t.rate;cap=t.cap;break;}}
     let fee=Math.floor(price*rate)*10000;if(cap!==null)fee=Math.min(fee,cap);
     const vat=Math.floor(fee*.1);
-    g('fee-rate').textContent=`${(rate*100).toFixed(1)}%`;g('fee-amount').textContent=fM(fee);
-    g('fee-vat').textContent=fM(vat);g('fee-total').textContent=fM(fee+vat);
+    g('fee-rate').textContent=`${(rate*100).toFixed(1)}%`; g('fee-amount').textContent=fM(fee);
+    g('fee-vat').textContent=fM(vat); g('fee-total').textContent=fM(fee+vat);
 }
 
 // ═══ 모달
