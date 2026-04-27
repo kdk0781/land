@@ -31,3 +31,13 @@ jobs:
           git add apt_trade_data.csv
           git commit -m "Update property data: $(date +'%Y-%m-%d')" || exit 0
           git push
+
+      - name: CSV를 고속 JSON으로 변환
+        run: python update_all.py
+
+      - name: 변경된 JSON 파일들 커밋 및 푸시
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git add trade_*.json
+          git commit -m "Auto-sync: CSV data to optimized JSON" || echo "No changes"
+          git push
