@@ -69,11 +69,27 @@ const TRADE_FILES = [
     { file:'trade_jeju.json',       sido:'제주특별자치도',label:'제주' },
 ];
 
+// ═══ Sticky 오프셋 동적 계산
+// 헤더→통계배너→필터 순서로 각 높이를 CSS 변수에 주입
+function updateStickyOffsets() {
+    const header = document.querySelector('.app-header');
+    const stats  = document.querySelector('.stats-wrap');
+    if (!header || !stats) return;
+    const headerH = header.getBoundingClientRect().height;
+    const statsH  = stats.getBoundingClientRect().height;
+    document.documentElement.style.setProperty('--header-h', headerH + 'px');
+    document.documentElement.style.setProperty('--stats-top', (headerH + statsH) + 'px');
+}
+
 // ═══ 초기화
 document.addEventListener('DOMContentLoaded', () => {
-    initSelects(); // ← 페이지 열자마자 전국 sido 목록 선 렌더링
+    initSelects();
     setupEvents();
     loadData();
+    // DOM 렌더 후 sticky 오프셋 계산
+    requestAnimationFrame(updateStickyOffsets);
+    // 리사이즈 시 재계산 (탭 전환 등으로 높이 변할 수 있음)
+    window.addEventListener('resize', updateStickyOffsets, { passive: true });
 });
 function setLoader(t) { const e=document.querySelector('.loader-text'); if(e) e.textContent=t; }
 function hideLoader()  { const e=g('loader'); if(e) e.style.display='none'; }
