@@ -46,10 +46,27 @@ const BROKER = [
 
 // ═══ 로드 파일 (전국 — GitHub Actions로 자동 업데이트)
 const TRADE_FILES = [
-    { file:'trade_seoul.json',      sido:'서울특별시', label:'서울' },
-    { file:'trade_gyeonggi_a.json', sido:'경기도',    label:'경기(1/2)' },
-    { file:'trade_gyeonggi_b.json', sido:'경기도',    label:'경기(2/2)' },
-    { file:'trade_incheon.json',    sido:'인천광역시', label:'인천' },
+    // 수도권 먼저 → 첫 화면 빠르게 표시
+    { file:'trade_seoul.json',      sido:'서울특별시',    label:'서울' },
+    { file:'trade_gyeonggi_a.json', sido:'경기도',        label:'경기(1/2)' },
+    { file:'trade_gyeonggi_b.json', sido:'경기도',        label:'경기(2/2)' },
+    { file:'trade_incheon.json',    sido:'인천광역시',    label:'인천' },
+    // 5대 광역시
+    { file:'trade_busan.json',      sido:'부산광역시',    label:'부산' },
+    { file:'trade_daegu.json',      sido:'대구광역시',    label:'대구' },
+    { file:'trade_gwangju.json',    sido:'광주광역시',    label:'광주' },
+    { file:'trade_daejeon.json',    sido:'대전광역시',    label:'대전' },
+    { file:'trade_ulsan.json',      sido:'울산광역시',    label:'울산' },
+    { file:'trade_sejong.json',     sido:'세종특별자치시',label:'세종' },
+    // 도 단위
+    { file:'trade_gangwon.json',    sido:'강원특별자치도',label:'강원' },
+    { file:'trade_chungbuk.json',   sido:'충청북도',      label:'충북' },
+    { file:'trade_chungnam.json',   sido:'충청남도',      label:'충남' },
+    { file:'trade_jeonbuk.json',    sido:'전북특별자치도',label:'전북' },
+    { file:'trade_jeonnam.json',    sido:'전라남도',      label:'전남' },
+    { file:'trade_gyeongbuk.json',  sido:'경상북도',      label:'경북' },
+    { file:'trade_gyeongnam.json',  sido:'경상남도',      label:'경남' },
+    { file:'trade_jeju.json',       sido:'제주특별자치도',label:'제주' },
 ];
 
 // ═══ 초기화
@@ -62,7 +79,7 @@ function loadData() {
     const guard = setTimeout(() => {
         hideLoader();
         if (!allRows.length) showEmpty('⏱ 로딩 시간 초과\ntrade_seoul.json 파일을 찾을 수 없습니다.');
-    }, 20000);
+    }, 60000);
 
     let firstDone=false, idx=0;
 
