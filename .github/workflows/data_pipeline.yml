@@ -8,29 +8,27 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30        # 전체 job 최대 30분
+    timeout-minutes: 30
 
     env:
-      PYTHONUNBUFFERED: "1"    # Python 출력 즉시 표시 (버퍼링 방지)
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: 저장소 체크아웃
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4        # v3 → v4 (Node.js 20 deprecated 해결)
 
       - name: Python 설정
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5   # v4 → v5 (Node.js 20 deprecated 해결)
         with:
           python-version: '3.11'
 
       - name: 의존성 설치
         run: pip install requests pandas
 
-      # ── Step 1: 전국 실거래 수집 ─────────────────────────────
       - name: 전국 실거래 데이터 수집 (fetch_data.py)
         timeout-minutes: 20
         run: python fetch_data.py
 
-      # ── Step 2: CSV 커밋 ──────────────────────────────────────
       - name: apt_trade_data.csv 커밋
         run: |
           git config --global user.name  "github-actions[bot]"
@@ -39,12 +37,10 @@ jobs:
           git commit -m "실거래 업데이트: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
           git push
 
-      # ── Step 3: CSV → JSON 변환 ───────────────────────────────
       - name: CSV → JSON 변환 (update_all.py)
         timeout-minutes: 5
         run: python update_all.py
 
-      # ── Step 4: 전국 JSON 커밋 ───────────────────────────────
       - name: 전국 JSON 파일 커밋 및 배포
         run: |
           git add \
