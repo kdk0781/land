@@ -5,6 +5,10 @@ on:
     - cron: '0 18 * * 1-5'   # UTC 18:00 = KST 03:00, 평일
   workflow_dispatch:
 
+# [추가] GitHub Actions가 레포지토리에 변경사항을 푸시할 수 있도록 쓰기 권한 부여
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,13 +16,15 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: "1"
+      # [추가] Node.js 20 Deprecation 경고를 해결하기 위해 Node 24 강제 사용
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: 저장소 체크아웃
-        uses: actions/checkout@v4        # v3 → v4 (Node.js 20 deprecated 해결)
+        uses: actions/checkout@v4
 
       - name: Python 설정
-        uses: actions/setup-python@v5   # v4 → v5 (Node.js 20 deprecated 해결)
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -31,11 +37,23 @@ jobs:
 
       - name: apt_trade_data.csv 커밋
         run: |
-          git config --global user.name  "github-actions[bot]"
+          git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add apt_trade_data.csv
-          git commit -m "실거래 업데이트: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
-          git push
+          
+          # [개선] 파일이 존재할 경우에만 add 진행하여 에러 방지
+          if [ -f apt_trade_data.csv ]; then
+            git add apt_trade_data.csv
+            
+            # [개선] 변경사항(diff)이 있을 때만 commit 및 push 진행
+            if ! git diff --staged --quiet; then
+              git commit -m "실거래 업데이트: $(date +'%Y-%m-%d')"
+              git push
+            else
+              echo "✅ CSV 파일 변경사항 없음"
+            fi
+          else
+            echo "⚠️ apt_trade_data.csv 파일이 생성되지 않았습니다."
+          fi
 
       - name: CSV → JSON 변환 (update_all.py)
         timeout-minutes: 5
@@ -43,24 +61,15 @@ jobs:
 
       - name: 전국 JSON 파일 커밋 및 배포
         run: |
-          git add \
-            trade_seoul.json \
-            trade_gyeonggi_a.json \
-            trade_gyeonggi_b.json \
-            trade_incheon.json \
-            trade_busan.json \
-            trade_daegu.json \
-            trade_gwangju.json \
-            trade_daejeon.json \
-            trade_ulsan.json \
-            trade_sejong.json \
-            trade_gangwon.json \
-            trade_chungbuk.json \
-            trade_chungnam.json \
-            trade_jeonbuk.json \
-            trade_jeonnam.json \
-            trade_gyeongbuk.json \
-            trade_gyeongnam.json \
-            trade_jeju.json
-          git commit -m "JSON 갱신: $(date +'%Y-%m-%d')" || echo "변경사항 없음"
-          git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # [개선] trade_ 로 시작하는 모든 json 파일을 안전하게 추가
+          git add trade_*.json || echo "추가할 JSON 파일이 없습니다."
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "JSON 갱신: $(date +'%Y-%m-%d')"
+            git push
+          else
+            echo "✅ JSON 파일 변경사항 없음"
+          fi
