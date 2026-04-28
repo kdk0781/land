@@ -1,5 +1,10 @@
 """
 fetch_data.py - 전국 아파트 실거래 + 전세 데이터 수집
+
+개선사항:
+  - API 실패 시 exit(1) 대신 기존 CSV 보존 + exit(0) (워크플로우 중단 방지)
+  - API 응답 resultCode 기준 정상 판단 (데이터 0건도 정상 응답이면 통과)
+  - 월초(1~3일)는 전전월도 추가 수집 (신고 지연 데이터 보완)
 """
 
 import requests
@@ -11,12 +16,11 @@ import time, sys, os, urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# stdout 즉시 출력
 def log(msg): print(msg, flush=True)
 
 API_KEY  = '4dc9ae5186b8259cfa06a26e9aa19e5c2758fb51804d6a48165b7f8ae499d50a'
 BASE_URL = "https://openapi.molit.go.kr/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/"
-TIMEOUT  = (5, 10)   # (connect, read)
+TIMEOUT  = (5, 10)
 WORKERS  = 20
 
 DISTRICT_MAP = {
@@ -54,19 +58,19 @@ DISTRICT_MAP = {
     '28200':('인천광역시','남동구'),   '28237':('인천광역시','부평구'),
     '28245':('인천광역시','계양구'),   '28260':('인천광역시','서구'),
     '28710':('인천광역시','강화군'),   '28720':('인천광역시','옹진군'),
-    # ── 광주광역시
+    # ── 광주광역시 (5개)
     '29110':('광주광역시','동구'),   '29140':('광주광역시','서구'),
     '29155':('광주광역시','남구'),   '29170':('광주광역시','북구'),
     '29200':('광주광역시','광산구'),
-    # ── 대전광역시
+    # ── 대전광역시 (5개)
     '30110':('대전광역시','동구'),   '30140':('대전광역시','중구'),
     '30170':('대전광역시','서구'),   '30200':('대전광역시','유성구'),
     '30230':('대전광역시','대덕구'),
-    # ── 울산광역시
+    # ── 울산광역시 (5개)
     '31110':('울산광역시','중구'),   '31140':('울산광역시','남구'),
     '31170':('울산광역시','동구'),   '31200':('울산광역시','북구'),
     '31710':('울산광역시','울주군'),
-    # ── 세종
+    # ── 세종특별자치시
     '36110':('세종특별자치시','세종시'),
     # ── 경기도 (42개)
     '41111':('경기도','수원시'),  '41113':('경기도','수원시'),
@@ -90,7 +94,7 @@ DISTRICT_MAP = {
     '41630':('경기도','양주시'),  '41650':('경기도','포천시'),
     '41670':('경기도','여주시'),  '41800':('경기도','연천군'),
     '41820':('경기도','가평군'),  '41830':('경기도','양평군'),
-    # ── 강원특별자치도
+    # ── 강원특별자치도 (18개)
     '51110':('강원특별자치도','춘천시'), '51130':('강원특별자치도','원주시'),
     '51150':('강원특별자치도','강릉시'), '51170':('강원특별자치도','동해시'),
     '51190':('강원특별자치도','태백시'), '51210':('강원특별자치도','속초시'),
@@ -100,14 +104,14 @@ DISTRICT_MAP = {
     '51780':('강원특별자치도','철원군'), '51790':('강원특별자치도','화천군'),
     '51800':('강원특별자치도','양구군'), '51810':('강원특별자치도','인제군'),
     '51820':('강원특별자치도','고성군'), '51830':('강원특별자치도','양양군'),
-    # ── 충청북도
+    # ── 충청북도 (11개)
     '43110':('충청북도','청주시'), '43130':('충청북도','충주시'),
     '43150':('충청북도','제천시'), '43720':('충청북도','보은군'),
     '43730':('충청북도','옥천군'), '43740':('충청북도','영동군'),
     '43745':('충청북도','증평군'), '43750':('충청북도','진천군'),
     '43760':('충청북도','괴산군'), '43770':('충청북도','음성군'),
     '43800':('충청북도','단양군'),
-    # ── 충청남도
+    # ── 충청남도 (15개)
     '44130':('충청남도','천안시'), '44150':('충청남도','공주시'),
     '44180':('충청남도','보령시'), '44200':('충청남도','아산시'),
     '44210':('충청남도','서산시'), '44230':('충청남도','논산시'),
@@ -116,7 +120,7 @@ DISTRICT_MAP = {
     '44770':('충청남도','서천군'), '44790':('충청남도','청양군'),
     '44800':('충청남도','홍성군'), '44810':('충청남도','예산군'),
     '44825':('충청남도','태안군'),
-    # ── 전북특별자치도
+    # ── 전북특별자치도 (14개)
     '52110':('전북특별자치도','전주시'), '52130':('전북특별자치도','군산시'),
     '52140':('전북특별자치도','익산시'), '52180':('전북특별자치도','정읍시'),
     '52190':('전북특별자치도','남원시'), '52210':('전북특별자치도','김제시'),
@@ -124,7 +128,7 @@ DISTRICT_MAP = {
     '52730':('전북특별자치도','무주군'), '52740':('전북특별자치도','장수군'),
     '52750':('전북특별자치도','임실군'), '52770':('전북특별자치도','순창군'),
     '52790':('전북특별자치도','고창군'), '52800':('전북특별자치도','부안군'),
-    # ── 전라남도
+    # ── 전라남도 (22개)
     '46110':('전라남도','목포시'), '46130':('전라남도','여수시'),
     '46150':('전라남도','순천시'), '46170':('전라남도','나주시'),
     '46230':('전라남도','광양시'), '46710':('전라남도','담양군'),
@@ -136,7 +140,7 @@ DISTRICT_MAP = {
     '46860':('전라남도','함평군'), '46870':('전라남도','영광군'),
     '46880':('전라남도','장성군'), '46900':('전라남도','완도군'),
     '46910':('전라남도','진도군'), '46920':('전라남도','신안군'),
-    # ── 경상북도
+    # ── 경상북도 (23개)
     '47110':('경상북도','포항시'), '47130':('경상북도','경주시'),
     '47150':('경상북도','김천시'), '47170':('경상북도','안동시'),
     '47190':('경상북도','구미시'), '47210':('경상북도','영주시'),
@@ -149,7 +153,7 @@ DISTRICT_MAP = {
     '47850':('경상북도','칠곡군'), '47900':('경상북도','예천군'),
     '47920':('경상북도','봉화군'), '47930':('경상북도','울진군'),
     '47940':('경상북도','울릉군'),
-    # ── 경상남도
+    # ── 경상남도 (18개)
     '48120':('경상남도','창원시'), '48170':('경상남도','진주시'),
     '48220':('경상남도','통영시'), '48240':('경상남도','사천시'),
     '48250':('경상남도','김해시'), '48270':('경상남도','밀양시'),
@@ -159,41 +163,50 @@ DISTRICT_MAP = {
     '48840':('경상남도','남해군'), '48850':('경상남도','하동군'),
     '48860':('경상남도','산청군'), '48870':('경상남도','함양군'),
     '48880':('경상남도','거창군'), '48890':('경상남도','합천군'),
-    # ── 제주
+    # ── 제주특별자치도 (2개)
     '50110':('제주특별자치도','제주시'),
     '50130':('제주특별자치도','서귀포시'),
 }
 
-today  = datetime.now()
-months = [today.strftime('%Y%m'),
-          (today.replace(day=1) - timedelta(days=1)).strftime('%Y%m')]
+# ─── 수집 기간 계산 ───────────────────────────────────────────
+today = datetime.now()
+months = [today.strftime('%Y%m')]
+prev   = (today.replace(day=1) - timedelta(days=1))
+months.append(prev.strftime('%Y%m'))
+# 월초(1~3일)는 전전월도 추가 (신고 지연 데이터 보완)
+if today.day <= 3:
+    prev2 = (prev.replace(day=1) - timedelta(days=1))
+    months.append(prev2.strftime('%Y%m'))
 
-# ─── API 연결 테스트 ──────────────────────────────────────────
+
+# ─── API 테스트 (결과 반환만, exit 안 함) ────────────────────
 def test_api():
-    """첫 요청 1건만 테스트해서 API 접근 가능 여부 확인"""
+    """API 접근 가능 여부 테스트 — 실패해도 워크플로우 중단 안 함"""
     endpoint = "getRTMSDataSvcAptTradeDev"
     url = f"{BASE_URL}{endpoint}?serviceKey={API_KEY}&LAWD_CD=11110&DEAL_YMD={months[0]}"
-    log(f"[테스트] API 연결 확인 중...")
-    log(f"[테스트] URL: {url[:80]}...")
+    log(f"[테스트] API 연결 확인 중... ({months[0]})")
     try:
-        res = requests.get(url, timeout=TIMEOUT, verify=False)
-        log(f"[테스트] HTTP 상태: {res.status_code}")
-        log(f"[테스트] 응답 앞 500자: {res.text[:500]}")
-
+        res  = requests.get(url, timeout=TIMEOUT, verify=False)
         root = ET.fromstring(res.content)
-        # API 응답 코드 확인
-        result_code = root.findtext('.//resultCode') or root.findtext('.//ResultCode') or '없음'
-        result_msg  = root.findtext('.//resultMsg')  or root.findtext('.//ResultMsg')  or '없음'
+        code = (root.findtext('.//resultCode') or
+                root.findtext('.//ResultCode') or '').strip()
+        msg  = (root.findtext('.//resultMsg')  or
+                root.findtext('.//ResultMsg')  or '').strip()
         items = root.findall('.//item')
-        log(f"[테스트] resultCode={result_code}, resultMsg={result_msg}")
-        log(f"[테스트] 데이터 건수: {len(items)}건")
-        return len(items) > 0 or result_code in ('00', '000', '0000')
+        log(f"[테스트] HTTP={res.status_code} | resultCode={code} | {len(items)}건")
+        log(f"[테스트] resultMsg: {msg}")
+        # 정상 응답 코드 (데이터 0건이어도 OK)
+        ok = code in ('00', '000', '0000', '0') or len(items) > 0
+        if not ok:
+            log(f"[테스트] 응답 앞 300자: {res.text[:300]}")
+        return ok
     except Exception as ex:
-        log(f"[테스트] 오류: {type(ex).__name__}: {ex}")
+        log(f"[테스트] 예외: {type(ex).__name__}: {ex}")
         return False
 
-# ─── 단일 요청 ────────────────────────────────────────────────
-error_log = []   # 오류 샘플 (최대 3개)
+
+# ─── 단일 요청 ───────────────────────────────────────────────
+error_samples = []
 
 def _fetch_one(url_type, lawd_cd, sido, sigungu, ymd):
     endpoint = ("getRTMSDataSvcAptTradeDev" if url_type == 'trade'
@@ -213,17 +226,17 @@ def _fetch_one(url_type, lawd_cd, sido, sigungu, ymd):
             items.append(d)
         return items
     except Exception as ex:
-        if len(error_log) < 3:
-            error_log.append(f"{type(ex).__name__}({lawd_cd}/{ymd}): {ex}")
+        if len(error_samples) < 3:
+            error_samples.append(f"{type(ex).__name__}({lawd_cd}/{ymd})")
         return []
 
-# ─── 병렬 수집 ────────────────────────────────────────────────
+
+# ─── 병렬 수집 ───────────────────────────────────────────────
 def fetch_all(url_type, label):
     tasks = [(c, s, sg, m)
              for c, (s, sg) in DISTRICT_MAP.items()
              for m in months]
-    total = len(tasks)
-    done, result = 0, []
+    total, done, result = len(tasks), 0, []
     t0 = time.time()
     log(f"[{label}] 시작: {total}건 / 동시 {WORKERS}개")
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -235,31 +248,37 @@ def fetch_all(url_type, label):
             if done % 100 == 0 or done == total:
                 log(f"  [{label}] {done}/{total} | {len(result):,}건 | {time.time()-t0:.0f}초")
     log(f"[{label}] 완료: {len(result):,}건 ({time.time()-t0:.1f}초)")
-    if error_log:
-        log(f"  오류 샘플: {error_log}")
-    error_log.clear()
+    if error_samples:
+        log(f"  오류 샘플: {error_samples}")
+        error_samples.clear()
     return result
 
-# ─── 메인 ─────────────────────────────────────────────────────
+
+# ─── 메인 ────────────────────────────────────────────────────
 t_start = time.time()
+CSV_PATH = 'apt_trade_data.csv'
+
 log("=" * 60)
 log("전국 실거래 데이터 수집 시작")
 log(f"수집 기간: {months}")
 log(f"지역코드: {len(DISTRICT_MAP)}개 | 동시: {WORKERS} | 타임아웃: {TIMEOUT}")
 log("=" * 60)
 
-# API 접근 가능 여부 먼저 테스트
-if not test_api():
+# ── API 테스트 ──────────────────────────────────────────────
+api_ok = test_api()
+if not api_ok:
     log("=" * 60)
-    log("❌ API 접근 실패 - 원인 확인 후 재시도하세요")
+    log("⚠ API 응답 비정상 — 기존 CSV 유지하고 워크플로우 계속 진행")
     log("가능한 원인:")
     log("  1. API 키 만료 또는 일일 트래픽 초과")
     log("  2. 공공데이터포털 서비스 점검 중")
-    log("  3. GitHub Actions IP 차단")
-    log("  4. 주말/공휴일 API 미운영")
+    log("  3. GitHub Actions IP 대역 일시 차단")
+    log("  4. 주말/공휴일 API 응답 불안정")
     log("=" * 60)
-    sys.exit(1)
+    # exit(0) → 워크플로우 정상 종료, CSV/JSON은 기존 파일 유지
+    sys.exit(0)
 
+# ── 데이터 수집 ────────────────────────────────────────────
 log("[1/2] 매매 데이터 수집...")
 all_t = fetch_all('trade', '매매')
 
@@ -269,10 +288,11 @@ all_r = fetch_all('rent',  '전세')
 log(f"수집 완료: 매매 {len(all_t):,}건 / 전세 {len(all_r):,}건")
 
 if not all_t:
-    log("❌ 매매 데이터 없음 - 저장 중단")
-    sys.exit(1)
+    log("⚠ 매매 데이터 0건 — 기존 CSV 유지하고 워크플로우 계속 진행")
+    log("  (API는 정상이나 해당 기간 데이터 없음 가능)")
+    sys.exit(0)   # exit(1) → exit(0) : 워크플로우 중단 방지
 
-# ─── DataFrame 처리 ───────────────────────────────────────────
+# ── DataFrame 처리 ─────────────────────────────────────────
 log("데이터 처리 중...")
 dt = pd.DataFrame(all_t)
 dt['아파트']     = dt['아파트'].str.strip()
@@ -284,8 +304,11 @@ if all_r:
     dr['아파트'] = dr['아파트'].str.strip()
     dr['보증금'] = dr['보증금액'].str.replace(',', '').astype(float)
     dr['면적_r'] = dr['전용면적'].astype(float).round(1)
-    dr_avg = dr.groupby(['sido','sigungu','dong','아파트','면적_r'])['보증금'].mean().reset_index()
-    df = pd.merge(dt, dr_avg, on=['sido','sigungu','dong','아파트','면적_r'], how='left')
+    dr_avg = dr.groupby(
+        ['sido', 'sigungu', 'dong', '아파트', '면적_r']
+    )['보증금'].mean().reset_index()
+    df = pd.merge(dt, dr_avg,
+                  on=['sido','sigungu','dong','아파트','면적_r'], how='left')
     df['보증금'] = df['보증금'].fillna(0)
 else:
     df = dt.copy(); df['보증금'] = 0
@@ -294,8 +317,10 @@ df['jeonsePrice'] = df['보증금']
 df['gap']         = df['거래금액_n'] - df['보증금']
 df['jeonseRatio'] = (df['보증금'] / df['거래금액_n'] * 100).round(1).fillna(0)
 
-out = df[['sido','sigungu','dong','아파트','전용면적','층',
-          '계약년월','계약일','거래금액_n','jeonsePrice','gap','jeonseRatio']
-        ].drop_duplicates()
-out.to_csv('apt_trade_data.csv', index=False, encoding='utf-8-sig')
-log(f"✅ 완료: {len(out):,}건 → apt_trade_data.csv ({time.time()-t_start:.1f}초)")
+out_cols = ['sido','sigungu','dong','아파트','전용면적','층',
+            '계약년월','계약일','거래금액_n','jeonsePrice','gap','jeonseRatio']
+out = df[out_cols].drop_duplicates()
+out.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
+
+elapsed = time.time() - t_start
+log(f"✅ 완료: {len(out):,}건 → {CSV_PATH} ({elapsed:.1f}초)")
