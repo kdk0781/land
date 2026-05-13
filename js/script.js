@@ -230,6 +230,30 @@ function applyDate() {
     if(errEl)errEl.textContent=''; applyFilter();
 }
 
+// ═══ 테마(다크/라이트) 토글 버튼 이벤트 ═══
+    const themeBtn = g('theme-toggle');
+    if (themeBtn) {
+        // 초기 렌더링 시 현재 테마에 맞춰 아이콘 설정
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+
+        themeBtn.addEventListener('click', () => {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            
+            if (isDark) {
+                // 다크 -> 라이트로 변경
+                document.documentElement.setAttribute('data-theme', 'light');
+                localStorage.setItem('theme', 'light');
+                themeBtn.textContent = '🌙';
+            } else {
+                // 라이트 -> 다크로 변경
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+                themeBtn.textContent = '☀️';
+            }
+        });
+    }
+
 // ═══ 필터 & 정렬
 function applyFilter() {
     const search=g('search-input').value.toLowerCase();
